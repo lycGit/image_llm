@@ -1,4 +1,5 @@
 import ImageNetTool
+import WebSocketTool
 
 
 def main():
@@ -23,4 +24,5 @@ def main():
             print("无效选项，请重新选择")
 
 if __name__ == '__main__':
-    main()
+    # main()
+   WebSocketTool.start_websocket()
