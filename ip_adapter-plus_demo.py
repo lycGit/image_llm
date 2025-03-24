@@ -50,3 +50,12 @@ images = ip_model.generate(pil_image=image, num_samples=1, num_inference_steps=5
         prompt="best quality, high quality, wearing a hat on the beach", scale=0.6)
 image = images[0]
 image.save("output1.png")
+
+# 添加文件上传功能
+from file_uploader import FileUploader
+uploader = FileUploader()
+result = uploader.upload_file("output1.png")
+if result:
+    print("文件上传成功")
+else:
+    print("文件上传失败")
