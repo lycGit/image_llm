@@ -1,52 +1,78 @@
 import websocket
 import threading
-import time
+import json
 
-# WebSocket 服务器地址
-WEBSOCKET_URL = "ws://localhost:8080/ws"
+class WebSocketClient:
+    def __init__(self, url="ws://127.0.0.1:8092/webSocket"):
+        self.url = url
+        self.ws = None
+        self.is_connected = False
 
+    def on_message(self, ws, message):
+        print(f"收到服务器消息: {message}")
 
-# 收到消息时的回调函数
-def on_message(ws, message):
-    print(f"Received: {message}")
+    def on_error(self, ws, error):
+        print(f"连接错误: {error}")
 
+    def on_close(self, ws, close_status_code, close_msg):
+        print("WebSocket连接已关闭")
+        self.is_connected = False
 
-# 发生错误时的回调函数
-def on_error(ws, error):
-    print(f"Error: {error}")
+    def on_open(self, ws):
+        print("WebSocket连接已建立")
+        self.is_connected = True
 
+    def send_message(self, message):
+        if self.ws and self.is_connected:
+            try:
+                self.ws.send(message)
+                print(f"发送消息: {message}")
+                return True
+            except Exception as e:
+                print(f"发送消息失败: {str(e)}")
+                return False
+        else:
+            print("WebSocket未连接")
+            return False
 
-# 连接关闭时的回调函数
-def on_close(ws, close_status_code, close_msg):
-    print("Connection closed")
+    def connect(self):
+        websocket.enableTrace(True)
+        self.ws = websocket.WebSocketApp(
+            self.url,
+            on_message=self.on_message,
+            on_error=self.on_error,
+            on_close=self.on_close,
+            on_open=self.on_open
+        )
+        
+        # 在新线程中运行WebSocket连接
+        wst = threading.Thread(target=self.ws.run_forever)
+        wst.daemon = True
+        wst.start()
 
+    def close(self):
+        if self.ws:
+            self.ws.close()
 
-# 连接成功时的回调函数
-def on_open(ws):
-    print("Connection opened")
-
-    # 发送消息
-    def send_message():
+def main():
+    # 创建WebSocket客户端实例
+    client = WebSocketClient()
+    
+    try:
+        # 连接到服务器
+        client.connect()
+        
+        # 主循环，接收用户输入并发送消息
         while True:
-            message = input("Enter a message: ")
-            ws.send(message)
-            time.sleep(1)  # 避免频繁发送
+            message = input("请输入要发送的消息（输入'quit'退出）: ")
+            if message.lower() == 'quit':
+                break
+            client.send_message(message)
+            
+    except KeyboardInterrupt:
+        print("\n程序已终止")
+    finally:
+        client.close()
 
-    # 启动一个线程发送消息
-    threading.Thread(target=send_message).start()
-
-
-def start_websocket():
-    # 创建 WebSocket 连接
-    ws = websocket.WebSocketApp(
-        WEBSOCKET_URL,
-        on_message=on_message,
-        on_error=on_error,
-        on_close=on_close,
-    )
-
-    # 设置连接成功时的回调
-    ws.on_open = on_open
-
-    # 启动 WebSocket 客户端
-    ws.run_forever()
+if __name__ == "__main__":
+    main()
