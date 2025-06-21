@@ -9,7 +9,13 @@ class WebSocketClient:
         self.is_connected = False
 
     def on_message(self, ws, message):
+        import subprocess
         print(f"收到服务器消息: {message}")
+        try:
+            subprocess.run(['python3', 'flux-midjourney-mix2-lora.py'],
+                           check=True)
+        except subprocess.CalledProcessError as e:
+            print(f'执行 flux-midjourney-mix2-lora.py 失败: {e}')
 
     def on_error(self, ws, error):
         print(f"连接错误: {error}")
