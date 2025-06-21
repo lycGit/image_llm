@@ -36,6 +36,9 @@
 # image = pipe("中国山水画，雾气缭绕，水墨风格").images[0]
 # image.save("kandinsky_output.png")
 
+import requests
+
+
 from diffusers import KandinskyV22Pipeline, KandinskyV22PriorPipeline
 import torch
 
@@ -74,3 +77,26 @@ image = pipe(
 ).images[0]
 
 image.save("kandinsky_output.png")
+
+import tempfile
+
+# 保存 image 到临时文件
+with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp_file:
+    image.save(tmp_file)
+    tmp_file_path = tmp_file.name
+
+files = {'file': open(tmp_file_path, 'rb')}
+data = {
+    'description': "自动生成的图片",
+    'category': '',  # 可根据实际情况修改
+    'tags': ''  # 可根据实际情况修改
+}
+try:
+    response = requests.post('http://127.0.0.1:8091/api/files/upload', files=files, data=data)
+    response.raise_for_status()
+    print('文件上传成功，响应结果:', response.json())
+except requests.RequestException as e:
+    print('文件上传失败:', e)
+finally:
+    import os
+    os.remove(tmp_file_path)
