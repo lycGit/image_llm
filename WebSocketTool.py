@@ -2,9 +2,6 @@ import websocket
 import threading
 import json
 
-from AsyncTaskQueue import AsyncTaskQueue
-
-queue_executor = AsyncTaskQueue()
 class WebSocketClient:
     def __init__(self, url="ws://127.0.0.1:8092/webSocket/user_py_llm"):
     # def __init__(self, url="ws://120.27.130.190:8092/webSocket"):
@@ -13,6 +10,7 @@ class WebSocketClient:
         self.is_connected = False
     def on_message(self, ws, message):
         import subprocess
+        import asyncio
         print(f"收到服务器消息: {message}")
 
         try:
@@ -21,8 +19,23 @@ class WebSocketClient:
 
             # 只有当JSON中有特定指令时才执行
             if json_data.get('action') == 'flux-midjourney-mix2-lora':
-                # queue_executor.add_task(json_data)
                 subprocess.run(['python3', 'flux-midjourney-mix2-lora.py'], check=True)
+               # 可以实现异步执行，但是速度太慢了
+               #  async def run_script():
+               #      try:
+               #          process = await asyncio.create_subprocess_exec(
+               #              'python3',
+               #              'flux-midjourney-mix2-lora.py',
+               #              stdout=asyncio.subprocess.PIPE,
+               #              stderr=asyncio.subprocess.PIPE
+               #          )
+               #          stdout, stderr = await process.communicate()
+               #          if process.returncode != 0:
+               #              raise Exception(stderr.decode())
+               #      except Exception as e:
+               #          print(f"执行脚本时出错: {e}")
+               #
+               #  asyncio.run(run_script())
             else:
                 print("无效请求", json_data)
 
