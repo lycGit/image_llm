@@ -2,21 +2,36 @@ import websocket
 import threading
 import json
 
+from AsyncTaskQueue import AsyncTaskQueue
+
+queue_executor = AsyncTaskQueue()
 class WebSocketClient:
-    # def __init__(self, url="ws://127.0.0.1:8092/webSocket"):
-    def __init__(self, url="ws://120.27.130.190:8092/webSocket"):
+    def __init__(self, url="ws://127.0.0.1:8092/webSocket/user_py_llm"):
+    # def __init__(self, url="ws://120.27.130.190:8092/webSocket"):
         self.url = url
         self.ws = None
         self.is_connected = False
-
     def on_message(self, ws, message):
         import subprocess
         print(f"收到服务器消息: {message}")
+
         try:
-            subprocess.run(['python3', 'flux-midjourney-mix2-lora.py'],
-                           check=True)
-        except subprocess.CalledProcessError as e:
-            print(f'执行 flux-midjourney-mix2-lora.py 失败: {e}')
+            json_data = json.loads(message)
+            print("成功解析为JSON对象:", json_data)
+
+            # 只有当JSON中有特定指令时才执行
+            if json_data.get('action') == 'flux-midjourney-mix2-lora':
+                # queue_executor.add_task(json_data)
+                subprocess.run(['python3', 'flux-midjourney-mix2-lora.py'], check=True)
+            else:
+                print("无效请求", json_data)
+
+        except json.JSONDecodeError:
+            print("消息不是JSON格式，按原样处理")
+            # 非JSON消息的默认处理
+            # subprocess.run(['python3', 'flux-midjourney-mix2-lora.py'], check=True)
+        # except subprocess.CalledProcessError as e:
+        #     print(f'执行失败: {e}')
 
     def on_error(self, ws, error):
         print(f"连接错误: {error}")
