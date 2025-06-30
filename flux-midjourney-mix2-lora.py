@@ -92,7 +92,8 @@ data = {
     'tags': ''  # 可根据实际情况修改
 }
 try:
-    response = requests.post('http://127.0.0.1:8091/api/files/upload', files=files, data=data)
+    # response = requests.post('http://127.0.0.1:8091/api/files/upload', files=files, data=data)
+    response = requests.post('http://120.27.130.190:8091/api/files/upload', files=files, data=data)
     response.raise_for_status()
     print('文件上传成功，响应结果:', response.json())
 except requests.RequestException as e:
