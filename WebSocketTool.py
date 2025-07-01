@@ -20,6 +20,13 @@ class WebSocketClient:
             # 只有当JSON中有特定指令时才执行
             if json_data.get('action') == 'flux-midjourney-mix2-lora':
                 subprocess.run(['python3', 'flux-midjourney-mix2-lora.py'], check=True)
+                data = {
+                    'targetUserId': json_data.get('userId'),
+                    "userId": json_data.get('userId'),
+                    "msg": "图片已创建完成",
+                }
+                json_str = json.dumps(data, ensure_ascii=False, indent=4)
+                self.send_message(json_str)
                # 可以实现异步执行，但是速度太慢了
                #  async def run_script():
                #      try:
