@@ -37,7 +37,7 @@
 # image.save("kandinsky_output.png")
 
 import requests
-
+import json
 
 from diffusers import KandinskyV22Pipeline, KandinskyV22PriorPipeline
 import torch
@@ -95,9 +95,13 @@ try:
     # response = requests.post('http://127.0.0.1:8091/api/files/upload', files=files, data=data)
     response = requests.post('http://120.27.130.190:8091/api/files/upload', files=files, data=data)
     response.raise_for_status()
-    print('文件上传成功，响应结果:', response.json())
+    with open('result.txt', 'w') as f:
+      f.write(json.dumps(response.json()))
+    # print('文件上传成功，响应结果:', response.json())
+    print(response.json())
 except requests.RequestException as e:
-    print('文件上传失败:', e)
+    # print('文件上传失败:', e)
+    print(e)
 finally:
     import os
     os.remove(tmp_file_path)
