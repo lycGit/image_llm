@@ -16,11 +16,11 @@ class WebSocketClient:
         try:
             json_data = json.loads(message)
             print("成功解析为JSON对象:", json_data)
-
+            discribe_msg = json_data["msg"]
             # 只有当JSON中有特定指令时才执行
             if json_data.get('action') == 'flux-midjourney-mix2-lora':
                 # subprocess.run(['python3', 'flux-midjourney-mix2-lora.py'], check=True)
-                process = subprocess.Popen(['python3', 'flux-midjourney-mix2-lora.py'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                process = subprocess.Popen(['python3', 'flux-midjourney-mix2-lora.py', '--discribe' ,discribe_msg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 stdout, stderr = process.communicate()
                 if process.returncode == 0:
                     try:
