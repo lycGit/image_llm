@@ -76,8 +76,10 @@ image = pipe(
     negative_prompt=negative_prompt,
     image_embeds=prior_output.image_embeds,
     negative_image_embeds=prior_output.negative_image_embeds,
-    height=512,
-    width=512,
+    # height=512,
+    # width=512,
+    height=256,
+    width=256,
     num_inference_steps=50
 ).images[0]
 
