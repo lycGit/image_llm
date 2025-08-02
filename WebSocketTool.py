@@ -19,6 +19,16 @@ class WebSocketClient:
             discribe_msg = json_data["msg"]
             # 只有当JSON中有特定指令时才执行
             if json_data.get('action') == 'flux-midjourney-mix2-lora':
+
+                # data = {
+                #     'targetUserId': json_data.get('userId'),
+                #     "userId": json_data.get('userId'),
+                #     "msg": "图片已创建完成",
+                #     "imageUrl": "http://120.27.130.190:8091/api/files/download/efc4c43c-614c-400d-960f-06751786f65c_tmpdvgp7yf0.png",
+                # }
+                # json_str = json.dumps(data, ensure_ascii=False, indent=4)
+                # self.send_message(json_str)
+
                 # subprocess.run(['python3', 'flux-midjourney-mix2-lora.py'], check=True)
                 process = subprocess.Popen(['python3', 'flux-midjourney-mix2-lora.py', '--discribe' ,discribe_msg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 stdout, stderr = process.communicate()
