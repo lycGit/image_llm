@@ -18,7 +18,30 @@ class WebSocketClient:
             print("成功解析为JSON对象:", json_data)
             discribe_msg = json_data["msg"]
             # 只有当JSON中有特定指令时才执行
-            if json_data.get('action') == 'flux-midjourney-mix2-lora':
+            if json_data.get('action') == 'IPAdapterFaceIDPortrait':
+                process = subprocess.Popen(['python3', 'IPAdapterFaceIDPortrait.py', '--discribe' ,discribe_msg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                stdout, stderr = process.communicate()
+                if process.returncode == 0:
+                    try:
+                        # result = json.loads(stdout)
+                        with open('result.txt', 'r') as f:
+                            result = f.read()
+                            image_json = json.loads(result)
+                        print('脚本执行成功，结果:', result)
+                        data = {
+                            'targetUserId': json_data.get('userId'),
+                            "userId": json_data.get('userId'),
+                            "msg": "图片已创建完成",
+                            "imageUrl": image_json.get('imageUrl'),
+                        }
+                        json_str = json.dumps(data, ensure_ascii=False, indent=4)
+                        self.send_message(json_str)
+                    except json.JSONDecodeError:
+                        print('解析结果失败，原始输出:', stdout)
+                else:
+                    print('脚本执行失败，错误信息:', stderr)
+
+            elif json_data.get('action') == 'flux-midjourney-mix2-lora':
 
                 # data = {
                 #     'targetUserId': json_data.get('userId'),

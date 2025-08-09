@@ -2,9 +2,22 @@
 import cv2
 from insightface.app import FaceAnalysis
 import torch
+import argparse
+
+parser = argparse.ArgumentParser(description='图像生成脚本')
+parser.add_argument('--discribe', required=True, help='生成图像的提示词')
+args = parser.parse_args()
+# 修改：使用命令行参数作为prompt
+urls = args.discribe.split(';')
+url = urls[0] 
+import urllib.request
+import numpy as np
+with urllib.request.urlopen(url) as response:
+    image_data = response.read()
+image = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
 
 app = FaceAnalysis(name="buffalo_l", providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
-app.prepare(ctx_id=0, det_size=(257, 257))
+app.prepare(ctx_id=0, det_size=(256, 256))
 
 
 # images = ["1.jpg", "2.jpg", "3.jpg", "4.jpg", "5.jpg"]
@@ -19,7 +32,7 @@ images = ["test_header_image.jpg"]
 # faces = app.get(image)
 # faceid_embeds.append(torch.from_numpy(faces[0].normed_embedding).unsqueeze(0).unsqueeze(0))
 
-image = cv2.imread("assets/images/woman1.png")
+# image = cv2.imread("assets/images/woman1.png")
 faces = app.get(image)
 faceid_embeds = faces[0].normed_embedding
 faceid_embeds = torch.from_numpy(faceid_embeds).unsqueeze(0)
@@ -64,7 +77,7 @@ prompt = "photo of a woman in red dress in a garden"
 negative_prompt = "monochrome, lowres, bad anatomy, worst quality, low quality, blurry"
 
 images = ip_model.generate(
-    prompt=prompt, negative_prompt=negative_prompt, faceid_embeds=faceid_embeds, num_samples=1, width=256, height=256, num_inference_steps=30, seed=2023
+    prompt=prompt, negative_prompt=negative_prompt, faceid_embeds=faceid_embeds, num_samples=1, width=256, height=256, num_inference_steps=50, seed=2023
 )
 image = images[0]
 image.save("output.png")
