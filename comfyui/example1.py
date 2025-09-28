@@ -78,7 +78,7 @@ def get_images(ws, prompt):
 
 
 # 读取workflows文件夹下的generate_image.json文件
-def load_workflow_from_json(file_path):
+def load_workflow_from_json(file_path, custom_prompt=None):
     with open(file_path, 'r', encoding='utf-8') as f:
         workflow_data = json.load(f)
     
@@ -141,6 +141,17 @@ def load_workflow_from_json(file_path):
                         prompt[node_id]["inputs"]["denoise"] = float(node['widgets_values'][5])
                     except (ValueError, TypeError):
                         prompt[node_id]["inputs"]["denoise"] = 1.0  # 使用默认值
+            elif node_type == 'CLIPTextEncode':
+                # 处理文本编码节点，检查是否需要替换提示语
+                if len(node['widgets_values']) > 0:
+                    # 检查是否是正面提示节点（包含原始提示语的节点）
+                    original_prompt = node['widgets_values'][0]
+                    if "beautiful scenery nature glass bottle landscape" in original_prompt and custom_prompt:
+                        # 使用自定义提示语
+                        prompt[node_id]["inputs"]["text"] = custom_prompt
+                    else:
+                        # 使用原始提示语
+                        prompt[node_id]["inputs"]["text"] = original_prompt
             else:
                 # 普通节点的处理逻辑
                 for i, value in enumerate(node['widgets_values']):
@@ -176,20 +187,30 @@ def load_workflow_from_json(file_path):
     return prompt
 
 
-# 加载workflow文件
-workflow_path = os.path.join(os.path.dirname(__file__), 'workflows', 'generate_image.json')
-prompt = load_workflow_from_json(workflow_path)
+def main():
+    # 定义默认提示语
+    default_prompt = "a beautiful sunset over the mountains"
+    
+    # 加载workflow文件
+    workflow_path = os.path.join(os.path.dirname(__file__), 'workflows', 'generate_image.json')
+    
+    # 使用默认提示语加载工作流
+    prompt = load_workflow_from_json(workflow_path, custom_prompt=default_prompt)
+    
+    # 创建一个WebSocket连接到服务器
+    ws = websocket.WebSocket()
+    ws.connect("ws://{}/ws?clientId={}".format(server_address, client_id))
+    
+    # 调用get_images()函数来获取图像
+    images = get_images(ws, prompt)
+    
+    # 显示图片
+    for node_id in images:
+        for image_data in images[node_id]:
+            image = Image.open(io.BytesIO(image_data))
+            image.show()
+            input("")
 
-# 创建一个WebSocket连接到服务器
-ws = websocket.WebSocket()
-ws.connect("ws://{}/ws?clientId={}".format(server_address, client_id))
 
-# 调用get_images()函数来获取图像
-images = get_images(ws, prompt)
-
-# 显示图片
-for node_id in images:
-    for image_data in images[node_id]:
-        image = Image.open(io.BytesIO(image_data))
-        image.show()
-        input("")
+if __name__ == "__main__":
+    main()
