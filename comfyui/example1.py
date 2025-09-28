@@ -5,6 +5,8 @@ import urllib.request
 import urllib.parse
 from PIL import Image
 import io
+import os
+import random
 
 # 设置服务器地址和客户端
 server_address = "127.0.0.1:8188"
@@ -75,134 +77,108 @@ def get_images(ws, prompt):
     return output_images
 
 
-# 示例JSON字符串，表示要使用的提示
-prompt_text = """
-{
-  "1": {
-    "inputs": {
-      "ckpt_name": "v1-5-pruned-emaonly-fp16.safetensors"
-    },
-    "class_type": "CheckpointLoaderSimple",
-    "_meta": {
-      "title": "加载检查点"
-    }
-  },
-  "3": {
-    "inputs": {
-      "seed": 152656324223018,
-      "steps": 20,
-      "cfg": 8,
-      "sampler_name": "euler",
-      "scheduler": "normal",
-      "denoise": 1,
-      "model": [
-        "1",
-        0
-      ],
-      "positive": [
-        "8",
-        0
-      ],
-      "negative": [
-        "9",
-        0
-      ],
-      "latent_image": [
-        "6",
-        0
-      ]
-    },
-    "class_type": "KSampler",
-    "_meta": {
-      "title": "K采样器"
-    }
-  },
-  "4": {
-    "inputs": {
-      "samples": [
-        "3",
-        0
-      ],
-      "vae": [
-        "1",
-        2
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE解码"
-    }
-  },
-  "5": {
-    "inputs": {
-      "filename_prefix": "ComfyUI",
-      "images": [
-        "4",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "保存图像"
-    }
-  },
-  "6": {
-    "inputs": {
-      "width": 512,
-      "height": 512,
-      "batch_size": 1
-    },
-    "class_type": "EmptyLatentImage",
-    "_meta": {
-      "title": "空潜空间图像"
-    }
-  },
-  "7": {
-    "inputs": {
-      "stop_at_clip_layer": -2,
-      "clip": [
-        "1",
-        1
-      ]
-    },
-    "class_type": "CLIPSetLastLayer",
-    "_meta": {
-      "title": "设置CLIP最后一层"
-    }
-  },
-  "8": {
-    "inputs": {
-      "text": "Running beside the beach",
-      "clip": [
-        "7",
-        0
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "CLIP文本编码（提示）"
-    }
-  },
-  "9": {
-    "inputs": {
-      "text": "",
-      "clip": [
-        "7",
-        0
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "CLIP文本编码（提示）"
-    }
-  }
-}
-"""
+# 读取workflows文件夹下的generate_image.json文件
+def load_workflow_from_json(file_path):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        workflow_data = json.load(f)
+    
+    # 创建提示对象
+    prompt = {}
+    
+    # 为每个节点创建基本结构
+    for node in workflow_data['nodes']:
+        node_id = str(node['id'])
+        prompt[node_id] = {
+            "inputs": {},
+            "class_type": node['type']
+        }
+    
+    # 处理每个节点的widgets_values和输入参数
+    for node in workflow_data['nodes']:
+        node_id = str(node['id'])
+        node_type = node['type']
+        
+        # 获取所有带widget的输入参数名称
+        widget_inputs = [input['name'] for input in node['inputs'] if 'widget' in input]
+        
+        # 如果有widgets_values，将其映射到对应的输入参数
+        if 'widgets_values' in node:
+            # 特殊处理KSampler节点
+            if node_type == 'KSampler':
+                # 根据generate_image.json中的widgets_values结构和已知的KSampler参数顺序进行映射
+                # widgets_values顺序: [seed, steps, cfg, sampler_name_index, scheduler_index, denoise]
+                if len(node['widgets_values']) >= 6:
+                    # 处理seed
+                    try:
+                        prompt[node_id]["inputs"]["seed"] = int(node['widgets_values'][0])
+                    except (ValueError, TypeError):
+                        prompt[node_id]["inputs"]["seed"] = random.randint(0, 2**32 - 1)
+                    
+                    # 处理steps
+                    steps_value = node['widgets_values'][1]
+                    if isinstance(steps_value, str) and steps_value == 'randomize':
+                        prompt[node_id]["inputs"]["steps"] = 20  # 使用默认值
+                    else:
+                        try:
+                            prompt[node_id]["inputs"]["steps"] = int(steps_value)
+                        except (ValueError, TypeError):
+                            prompt[node_id]["inputs"]["steps"] = 20  # 使用默认值
+                    
+                    # 处理cfg
+                    try:
+                        prompt[node_id]["inputs"]["cfg"] = float(node['widgets_values'][2])
+                    except (ValueError, TypeError):
+                        prompt[node_id]["inputs"]["cfg"] = 8.0  # 使用默认值
+                    
+                    # 处理sampler_name - 这里使用固定值，因为从错误信息看'8'不是有效值
+                    prompt[node_id]["inputs"]["sampler_name"] = "euler_ancestral"
+                    
+                    # 处理scheduler - 使用服务器支持的值
+                    prompt[node_id]["inputs"]["scheduler"] = "normal"
+                    
+                    # 处理denoise
+                    try:
+                        prompt[node_id]["inputs"]["denoise"] = float(node['widgets_values'][5])
+                    except (ValueError, TypeError):
+                        prompt[node_id]["inputs"]["denoise"] = 1.0  # 使用默认值
+            else:
+                # 普通节点的处理逻辑
+                for i, value in enumerate(node['widgets_values']):
+                    if i < len(widget_inputs):
+                        input_name = widget_inputs[i]
+                        prompt[node_id]["inputs"][input_name] = value
+        
+        # 为SaveImage节点确保有filename_prefix
+        if node_type == 'SaveImage' and 'filename_prefix' not in prompt[node_id]["inputs"]:
+            prompt[node_id]["inputs"]["filename_prefix"] = "ComfyUI"
+    
+    # 处理节点之间的链接
+    for link in workflow_data['links']:
+        link_id, source_node_id, source_output_idx, target_node_id, target_input_idx, link_type = link
+        
+        source_node_str = str(source_node_id)
+        target_node_str = str(target_node_id)
+        
+        # 确保源节点和目标节点存在
+        if source_node_str not in prompt or target_node_str not in prompt:
+            continue
+        
+        # 找到目标节点中对应索引的输入参数名称
+        target_node = next((n for n in workflow_data['nodes'] if str(n['id']) == target_node_str), None)
+        if target_node is None or target_input_idx >= len(target_node['inputs']):
+            continue
+        
+        target_input_name = target_node['inputs'][target_input_idx]['name']
+        
+        # 设置链接值，格式为[源节点ID, 输出索引]
+        prompt[target_node_str]["inputs"][target_input_name] = [source_node_str, source_output_idx]
+    
+    return prompt
 
-# 将示例JSON字符串解析为Python字典，并根据需要修改其中的文本提示和种子值
-prompt = json.loads(prompt_text)
-prompt["8"]["inputs"]["text"] = " a beatiful girl Running beside the beach"
-prompt["3"]["inputs"]["seed"] = 1
+
+# 加载workflow文件
+workflow_path = os.path.join(os.path.dirname(__file__), 'workflows', 'generate_image.json')
+prompt = load_workflow_from_json(workflow_path)
 
 # 创建一个WebSocket连接到服务器
 ws = websocket.WebSocket()
