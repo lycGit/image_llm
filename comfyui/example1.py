@@ -189,8 +189,7 @@ def load_workflow_from_json(file_path, custom_prompt=None):
 
 def main():
     # 定义默认提示语
-    default_prompt = "a beautiful sunset over the mountains"
-    
+    default_prompt = "outdoor portrait photography, beautiful woman in natural setting, golden hour sunlight, dappled light through leaves, garden background with blooming flowers, wind-blown hair, natural makeup, joyful expression, cinematic lighting, high dynamic range, professional color grading"
     # 加载workflow文件
     workflow_path = os.path.join(os.path.dirname(__file__), 'workflows', 'generate_image.json')
     
