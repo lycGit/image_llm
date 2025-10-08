@@ -235,14 +235,110 @@ def load_workflow_from_json(file_path, custom_prompt=None, image_filename=None):
     
     return prompt
 
+
+# 由外界传入提示词和图片URL生成图片的函数
+def generate_image_from_url_and_prompt(prompt_text, image_url, workflow_path=None):
+    """
+    从给定的图片URL和提示词生成新图片
+    
+    参数:
+        prompt_text (str): 提示词文本
+        image_url (str): 图片的URL地址
+        workflow_path (str, optional): 工作流文件路径，如果为None则使用默认路径
+        
+    返回:
+        dict: 包含生成结果的字典
+    """
+    try:
+        # 如果没有提供工作流路径，使用默认路径
+        if workflow_path is None:
+            workflow_path = os.path.join(os.path.dirname(__file__), 'workflows', 'image2image.json')
+            
+        # 1. 从URL下载图片到临时文件
+        print(f"正在从URL下载图片: {image_url}")
+        temp_image_path = download_image_from_url(image_url)
+        
+        try:
+            # 2. 上传图片到ComfyUI服务器
+            image_filename = upload_image(temp_image_path)
+            
+            # 3. 使用提示词和上传的图片加载工作流
+            prompt = load_workflow_from_json(workflow_path, custom_prompt=prompt_text, image_filename=image_filename)
+            
+            # 4. 创建WebSocket连接到服务器
+            ws = websocket.WebSocket()
+            ws.connect(f"ws://{server_address}/ws?clientId={client_id}")
+            
+            # 5. 获取生成的图像
+            images = get_images(ws, prompt)
+            
+            # 6. 处理生成的图像
+            results = []
+            for node_id in images:
+                for image_data in images[node_id]:
+                    image = Image.open(io.BytesIO(image_data))
+                    # 7. 上传图像到远程服务器
+                    upload_result = uploadImage(image)
+                    results.append({
+                        'image_data': image_data,
+                        'upload_result': upload_result
+                    })
+            
+            return {
+                'success': True,
+                'results': results,
+                'message': '图片生成和上传成功'
+            }
+        finally:
+            # 清理临时文件
+            if os.path.exists(temp_image_path):
+                os.remove(temp_image_path)
+    except Exception as e:
+        print(f"图片生成过程中出错: {str(e)}")
+        return {
+            'success': False,
+            'error': str(e),
+            'message': '图片生成失败'
+        }
+
+# 辅助函数：从URL下载图片
+
+def download_image_from_url(image_url):
+    """
+    从URL下载图片并保存到临时文件
+    
+    参数:
+        image_url (str): 图片的URL地址
+        
+    返回:
+        str: 临时文件的路径
+    """
+    import tempfile
+    import urllib.request
+    
+    # 创建临时文件
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+    temp_file_path = temp_file.name
+    temp_file.close()
+    
+    # 下载图片到临时文件
+    try:
+        urllib.request.urlretrieve(image_url, temp_file_path)
+        return temp_file_path
+    except Exception as e:
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+        raise Exception(f"下载图片失败: {str(e)}")
+
+# 修改现有的uploadImage函数，使其返回上传结果
 def uploadImage(image):
     import tempfile
-
+    
     # 保存 image 到临时文件
     with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp_file:
         image.save(tmp_file)
         tmp_file_path = tmp_file.name
-
+    
     files = {'file': open(tmp_file_path, 'rb')}
     data = {
         'description': "自动生成的图片",
@@ -250,16 +346,19 @@ def uploadImage(image):
         'tags': ''  # 可根据实际情况修改
     }
     try:
-        # response = requests.post('http://127.0.0.1:8091/api/files/upload', files=files, data=data)
         response = requests.post('http://120.27.130.190:8091/api/files/upload', files=files, data=data)
         response.raise_for_status()
+        result = response.json()
+        print('文件上传成功，响应结果:', result)
+        
+        # 保存结果到文件
         with open('result.txt', 'w') as f:
-            f.write(json.dumps(response.json()))
-        # print('文件上传成功，响应结果:', response.json())
-        print(response.json())
+            f.write(json.dumps(result))
+            
+        return result  # 返回上传结果
     except requests.RequestException as e:
-        # print('文件上传失败:', e)
-        print(e)
+        print(f'文件上传失败: {e}')
+        return {'error': str(e)}
     finally:
         import os
         os.remove(tmp_file_path)
@@ -301,5 +400,25 @@ def main():
         print(f"程序执行出错: {str(e)}")
 
 
+# 使用示例
+def example_usage():
+    # 提示词
+    prompt = "outdoor portrait photography, beautiful woman in natural setting, golden hour sunlight"
+    
+    # 图片URL
+    image_url = "http://120.27.130.190:8091/api/files/download/14d1ea3f-07ea-4302-afff-adc3e6d03c0e_tmpx4_5ndmd.png"
+    
+    # 调用图片生成函数
+    result = generate_image_from_url_and_prompt(prompt, image_url)
+    
+    if result['success']:
+        print("图片生成成功!")
+        # 访问结果
+        for i, item in enumerate(result['results']):
+            print(f"结果 {i+1}: {item['upload_result']}")
+    else:
+        print(f"图片生成失败: {result['error']}")
+
 if __name__ == "__main__":
-    main()
+    # main()
+    example_usage()
