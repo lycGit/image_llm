@@ -106,7 +106,8 @@ def load_workflow_from_json(file_path, custom_prompt=None, image_filename=None):
                         prompt[node_id]["inputs"]["sampler_name"] = "dpmpp_2m"
                     
                     if len(node['widgets_values']) >= 5:
-                        scheduler = node['widgets_values'][4] if isinstance(node['widgets_values'][4], str) else "normal"
+                        # 修复这里，将'normal'设为默认调度器
+                        scheduler = "normal"  # 直接使用有效的调度器值
                         prompt[node_id]["inputs"]["scheduler"] = scheduler
                     else:
                         prompt[node_id]["inputs"]["scheduler"] = "normal"
@@ -199,7 +200,7 @@ def run_comfyui_workflow(workflow_type, prompt_text, image_path=None):
         
         if response.status_code == 200:
             prompt_id = response.json()['prompt_id']
-            return {'success': True, 'prompt_id': prompt_id, 'client_id': client_id}
+            return {'success': True, 'prompt_id': prompt_id, 'client_id': client_id, 'api_url': app.config['COMFYUI_API_URL']}
         else:
             error_details = response.text if response.text else '未知错误'
             raise Exception(f"ComfyUI API错误: {error_details}")
@@ -209,14 +210,124 @@ def run_comfyui_workflow(workflow_type, prompt_text, image_path=None):
 # 获取生成进度
 def get_progress(prompt_id):
     try:
-        response = requests.get(f"{app.config['COMFYUI_API_URL']}/prompt/{prompt_id}")
+        # 确保COMFYUI_API_URL配置正确且不以斜杠结尾
+        api_url = app.config['COMFYUI_API_URL'].rstrip('/')
+        
+        # 首先尝试检查历史记录，这是判断任务是否完成的最可靠方法
+        history_url = f"{api_url}/history/{prompt_id}"
+        history_response = requests.get(history_url, timeout=5)
+        
+        if history_response.status_code == 200:
+            history_data = history_response.json()
+            # 如果prompt_id在历史记录中，说明任务已完成
+            if prompt_id in history_data:
+                return {'success': True, 'progress': 1.0, 'completed': True}
+        
+        # 尝试使用queue API作为备选的进度查询方法
+        queue_url = f"{api_url}/queue"
+        queue_response = requests.get(queue_url, timeout=5)
+        
+        if queue_response.status_code == 200:
+            try:
+                queue_data = queue_response.json()
+                # 检查队列状态
+                if isinstance(queue_data, dict):
+                    # 返回一个估计的进度值，实际应用中可能需要根据队列长度调整
+                    if queue_data.get('status') == 'idle':
+                        return {'success': True, 'progress': 0.9, 'completed': False}
+                    else:
+                        return {'success': True, 'progress': 0.5, 'completed': False}
+            except json.JSONDecodeError:
+                pass
+        
+        # 如果以上方法都失败，返回一个默认的进行中状态
+        return {'success': True, 'progress': 0.3, 'completed': False}
+    except requests.exceptions.ConnectionError:
+        return {'success': False, 'error': f'无法连接到ComfyUI服务: {app.config["COMFYUI_API_URL"]}\n请确保ComfyUI服务已启动'}
+    except requests.exceptions.Timeout:
+        return {'success': False, 'error': '请求ComfyUI API超时'}
+    except Exception as e:
+        return {'success': False, 'error': f'获取进度异常: {str(e)}'}
+
+# 获取生成的图像
+def get_generated_image(prompt_id):
+    try:
+        # 获取历史记录以获取图像
+        response = requests.get(f"{app.config['COMFYUI_API_URL']}/history/{prompt_id}")
         if response.status_code == 200:
-            data = response.json()
-            if 'progress' in data:
-                return {'success': True, 'progress': data['progress'], 'completed': data['status'] == 'completed'}
-            else:
-                return {'success': True, 'progress': 0, 'completed': False}
+            history = response.json()
+            if prompt_id in history and 'outputs' in history[prompt_id]:
+                outputs = history[prompt_id]['outputs']
+                # 查找包含图像的节点
+                for node_id, node_outputs in outputs.items():
+                    if 'images' in node_outputs:
+                        for image_data in node_outputs['images']:
+                            # 从ComfyUI获取图像
+                            image_url = f"{app.config['COMFYUI_API_URL']}/view?filename={image_data['filename']}&subfolder={image_data['subfolder']}&type={image_data['type']}"
+                            img_response = requests.get(image_url)
+                            if img_response.status_code == 200:
+                                # 保存图像到临时位置
+                                img = Image.open(io.BytesIO(img_response.content))
+                                temp_path = os.path.join(app.config['UPLOAD_FOLDER'], f"generated_{prompt_id}.png")
+                                img.save(temp_path)
+                                return {'success': True, 'image_path': temp_path}
+            return {'success': False, 'error': "生成结果中未找到图像"}
         return {'success': False, 'error': f"API错误: {response.text}"}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+
+# 检查任务是否完成（更可靠的方法）
+def is_task_completed(prompt_id):
+    try:
+        api_url = app.config['COMFYUI_API_URL'].rstrip('/')
+        history_url = f"{api_url}/history/{prompt_id}"
+        
+        response = requests.get(history_url, timeout=5)
+        if response.status_code == 200:
+            history_data = response.json()
+            return prompt_id in history_data
+        return False
+    except:
+        return False
+
+# 在run_comfyui_workflow函数中，修改返回值以包含更详细信息
+def run_comfyui_workflow(workflow_type, prompt_text, image_path=None):
+    try:
+        # 根据工作流类型选择对应的JSON文件
+        if workflow_type == 'image2image':
+            workflow_path = os.path.join(os.path.dirname(__file__), 'workflows', 'image2image.json')
+        else:
+            workflow_path = os.path.join(os.path.dirname(__file__), 'workflows', 'generate_image.json')
+        
+        # 检查工作流文件是否存在
+        if not os.path.exists(workflow_path):
+            raise Exception(f'工作流文件不存在: {workflow_path}')
+        
+        # 上传图片到ComfyUI(如果提供了图片)
+        image_filename = None
+        if image_path and os.path.exists(image_path):
+            image_filename = upload_image_to_comfyui(image_path)
+        
+        # 加载并处理工作流
+        prompt = load_workflow_from_json(workflow_path, custom_prompt=prompt_text, image_filename=image_filename)
+        
+        # 创建客户端ID
+        client_id = str(uuid.uuid4())
+        
+        # 发送工作流到ComfyUI API
+        response = requests.post(
+            f"{app.config['COMFYUI_API_URL']}/prompt",
+            json={'prompt': prompt, 'client_id': client_id}
+        )
+        
+        if response.status_code == 200:
+            prompt_id = response.json()['prompt_id']
+            return {'success': True, 'prompt_id': prompt_id, 'client_id': client_id, 'api_url': app.config['COMFYUI_API_URL']}
+        else:
+            error_details = response.text if response.text else '未知错误'
+            raise Exception(f"ComfyUI API错误: {error_details}")
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
