@@ -629,8 +629,25 @@ class ComfyUIVideoGenerator:
             
             print(f"任务ID: {prompt_id}")
             
-            # 5. 跟踪生成进度
-            self.track_progress(prompt_id)
+            # 5. 跟踪生成进度，并获取执行结果状态
+            progress_result = self.track_progress(prompt_id)
+            
+            # 修复：添加空值检查
+            if progress_result is None:
+                print("警告：track_progress返回了None")
+                return {
+                    'success': False,
+                    'error': '跟踪进度失败',
+                    'message': '无法获取视频生成进度信息'
+                }
+            
+            # 检查跟踪结果，如果失败直接返回
+            if not progress_result.get('success', False):
+                return {
+                    'success': False,
+                    'error': progress_result.get('error', '跟踪进度失败'),
+                    'message': progress_result.get('message', '视频生成过程中出现问题')
+                }
             
             # 检查是否被中断
             if not should_continue:
