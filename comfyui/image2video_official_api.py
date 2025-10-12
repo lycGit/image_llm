@@ -17,50 +17,7 @@ WEBSOCKET_URL = "ws://127.0.0.1:8188/ws"
 # 标志变量，用于控制程序是否继续运行
 should_continue = True
 
-# 信号处理函数，用于优雅地处理中断
-def signal_handler(sig, frame):
-    global should_continue
-    print('\n程序被中断，正在清理资源...')
-    should_continue = False
 
-# 注册信号处理函数
-signal.signal(signal.SIGINT, signal_handler)
-
-# 下载图片的辅助函数
-def download_image_from_url(image_url):
-    """从URL下载图片并保存到临时文件"""
-    try:
-        # 创建临时文件
-        temp_dir = tempfile.gettempdir()
-        temp_filename = f"temp_image_{uuid.uuid4().hex}.png"
-        temp_path = os.path.join(temp_dir, temp_filename)
-        
-        print(f"正在从URL下载图片: {image_url}")
-        
-        # 使用urllib或requests下载图片
-        try:
-            # 优先使用requests
-            response = requests.get(image_url, timeout=30)
-            response.raise_for_status()  # 如果响应状态码不是200，抛出异常
-            
-            # 保存图片
-            with open(temp_path, 'wb') as f:
-                f.write(response.content)
-        except ImportError:
-            # 如果没有requests库，使用urllib
-            urllib.request.urlretrieve(image_url, temp_path)
-        
-        print(f"图片下载成功，保存至: {temp_path}")
-        return temp_path
-    except Exception as e:
-        print(f"下载图片失败: {str(e)}")
-        # 尝试使用本地默认图片
-        default_image_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets', 'images', 'girl.png')
-        if os.path.exists(default_image_path):
-            print(f"使用默认图片: {default_image_path}")
-            return default_image_path
-        else:
-            raise Exception(f"下载图片失败且找不到默认图片: {str(e)}")
 
 # 设置服务器地址和客户端
 server_address = "127.0.0.1:8188"
@@ -114,104 +71,7 @@ def download_image_from_url(image_url):
         else:
             raise Exception(f"下载图片失败且找不到默认图片: {str(e)}")
 
-# 定义向服务器发送提示的函数
-def queue_prompt(prompt):
-    try:
-        p = {"prompt": prompt, "client_id": client_id}
-        data = json.dumps(p).encode('utf-8')
-        req = urllib.request.Request(
-            "http://{}/prompt".format(server_address),
-            data=data,
-            headers={'Content-Type': 'application/json'}
-        )
-        response = urllib.request.urlopen(req)
-        return json.loads(response.read())
-    except urllib.error.HTTPError as e:
-        print(f"HTTP错误: {e.code} - {e.reason}")
-        print(f"错误详情: {e.read().decode()}")
-        raise
-    except Exception as e:
-        print(f"请求出错: {str(e)}")
-        raise
 
-# 定义从服务器下载图像数据的函数
-def get_image(filename, subfolder, folder_type):
-    data = {"filename": filename, "subfolder": subfolder, "type": folder_type}
-    url_values = urllib.parse.urlencode(data)
-    with urllib.request.urlopen("http://{}/view?{}".format(server_address, url_values)) as response:
-        return response.read()
-
-# 定义获取历史记录的函数
-def get_history(prompt_id):
-    try:
-        with urllib.request.urlopen("http://{}/history/{}".format(server_address, prompt_id)) as response:
-            return json.loads(response.read())
-    except urllib.error.HTTPError as e:
-        print(f"HTTP错误: {e.code} - {e.reason}")
-        print(f"错误详情: {e.read().decode()}")
-        raise
-    except Exception as e:
-        print(f"获取历史记录出错: {str(e)}")
-        raise
-
-# 定义通过WebSocket接收消息并下载图像的函数
-def get_images(ws, prompt):
-    global should_continue
-    prompt_id = queue_prompt(prompt)['prompt_id']
-    output_images = {}
-
-    # 等待任务完成
-    while should_continue:
-        try:
-            result = ws.recv()
-            if not result:
-                continue
-            message = json.loads(result)
-            
-            # 处理进度消息
-            if message['type'] == 'progress':
-                data = message.get('data', {})
-                if 'value' in data and 'max' in data:
-                    progress = data['value'] / data['max'] * 100
-                    node_id = data.get('node_id', 'unknown')
-                    print(f"正在执行节点: {node_id} ({progress:.1f}%)", end="\r")
-            
-            # 处理执行状态消息
-            elif message['type'] == 'execution_state' and message['data'] == 'idle':
-                print("\n视频生成完成")
-                break
-            
-            # 处理执行错误消息
-            elif message['type'] == 'execution_error':
-                error_msg = message.get('data', {}).get('error', '未知错误')
-                print(f"\n执行错误: {error_msg}")
-                raise Exception(f"执行错误: {error_msg}")
-        except websocket.WebSocketConnectionClosedException:
-            print("\nWebSocket连接已关闭")
-            break
-        except Exception as e:
-            print(f"\nWebSocket接收消息出错: {str(e)}")
-            break
-
-    # 获取历史记录
-    history = get_history(prompt_id)
-    if prompt_id in history:
-        outputs = history[prompt_id].get('outputs', {})
-        
-        # 遍历所有输出节点
-        for node_id, node_output in outputs.items():
-            if 'images' in node_output:
-                output_images[node_id] = []
-                for image_info in node_output['images']:
-                    # 下载图像数据
-                    image_data = get_image(
-                        image_info['filename'], 
-                        image_info['subfolder'], 
-                        image_info['type']
-                    )
-                    output_images[node_id].append(image_data)
-    
-    return output_images
 
 # ComfyUIVideoGenerator类
 class ComfyUIVideoGenerator:
@@ -562,8 +422,8 @@ class ComfyUIVideoGenerator:
             image_filename = response_json.get('name')
             
             if not image_filename:
-                # 如果没有返回name字段，尝试使用原始文件名
-                image_filename = image_filename
+                # 修复自我赋值bug，使用原始文件名
+                image_filename = os.path.basename(image_path)
                 print(f"警告：服务器未返回图片名称，使用原始文件名: {image_filename}")
             
             print(f"图片上传成功: {image_filename}")
