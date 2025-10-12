@@ -686,7 +686,51 @@ class ComfyUIVideoGenerator:
             except:
                 pass
     
-    def generate_video(self, workflow_path, image_path, custom_prompt=None, negative_prompt=None):
+    def download_video(self, video_url, save_directory=None, filename=None):
+        """下载视频文件并保存到本地"""
+        try:
+            # 确定保存目录
+            if save_directory is None:
+                # 默认保存到当前工作目录的output_videos子目录
+                save_directory = os.path.join(os.getcwd(), 'output_videos')
+                
+            # 确保保存目录存在
+            os.makedirs(save_directory, exist_ok=True)
+            
+            # 确定文件名
+            if filename is None:
+                # 从URL或当前时间生成文件名
+                if 'filename=' in video_url:
+                    # 尝试从URL中提取文件名
+                    url_filename = urllib.parse.unquote(video_url.split('filename=')[1].split('&')[0])
+                    filename = url_filename
+                else:
+                    # 使用时间戳生成唯一文件名
+                    timestamp = time.strftime('%Y%m%d_%H%M%S')
+                    filename = f"comfyui_video_{timestamp}.mp4"
+            
+            # 构建完整的保存路径
+            save_path = os.path.join(save_directory, filename)
+            
+            print(f"正在下载视频到本地: {save_path}")
+            
+            # 发送GET请求下载视频
+            response = requests.get(video_url, stream=True)
+            response.raise_for_status()
+            
+            # 写入文件
+            with open(save_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            
+            print(f"视频已成功保存到: {save_path}")
+            return save_path
+        except Exception as e:
+            print(f"下载视频失败: {str(e)}")
+            raise
+
+    def generate_video(self, workflow_path, image_path, custom_prompt=None, negative_prompt=None, save_to_local=True, save_directory=None):
         """生成视频的主函数"""
         global should_continue
         
@@ -826,6 +870,15 @@ class ComfyUIVideoGenerator:
                     video_url = f"{self.server_url}/view?filename={filename}&subfolder={subfolder}&type={type_}"
                     result['video_url'] = video_url
                     print(f"视频生成成功，下载地址: {video_url}")
+                    
+                    # 如果需要保存到本地
+                    if save_to_local:
+                        try:
+                            local_video_path = self.download_video(video_url, save_directory=save_directory, filename=video_info['filename'])
+                            result['local_video_path'] = local_video_path
+                        except Exception as e:
+                            print(f"保存视频到本地失败，但视频生成成功: {str(e)}")
+                            result['local_video_save_error'] = str(e)
             elif frames_count > 0:
                 result['success'] = False
                 result['error'] = '只生成了图像帧但没有视频'
