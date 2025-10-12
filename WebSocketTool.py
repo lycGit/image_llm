@@ -2,6 +2,9 @@ import websocket
 import threading
 import json
 
+from comfyui.image2image import generate_image_from_url_and_prompt
+
+
 class WebSocketClient:
     # def __init__(self, url="ws://127.0.0.1:8092/webSocket/user_py_llm"):
     def __init__(self, url="ws://120.27.130.190:8092/webSocket/user_py_llm"):
@@ -18,7 +21,32 @@ class WebSocketClient:
             print("成功解析为JSON对象:", json_data)
             discribe_msg = json_data["msg"]
             # 只有当JSON中有特定指令时才执行
-            if json_data.get('action') == 'IPAdapterFaceIDPortrait':
+            if json_data.get('action') == 'image2image':
+                # 提示词
+                prompt = "outdoor portrait photography, beautiful woman in natural setting, golden hour sunlight"
+
+                # 图片URL
+                image_url = "http://120.27.130.190:8091/api/files/download/14d1ea3f-07ea-4302-afff-adc3e6d03c0e_tmpx4_5ndmd.png"
+
+                # 调用图片生成函数
+                result = generate_image_from_url_and_prompt(prompt, image_url)
+
+                if result['success']:
+                    print("图片生成成功!")
+                    # 访问结果
+                    for i, item in enumerate(result['results']):
+                        print(f"结果 {i + 1}: {item['upload_result']}")
+                        data = {
+                            'targetUserId': json_data.get('userId'),
+                            "userId": json_data.get('userId'),
+                            "msg": "图片已创建完成",
+                            "imageUrl": item['upload_result'].get('imageUrl1'),
+                        }
+                        json_str = json.dumps(data, ensure_ascii=False, indent=4)
+                        self.send_message(json_str)
+                else:
+                    print(f"图片生成失败: {result['error']}")
+            elif json_data.get('action') == 'IPAdapterFaceIDPortrait':
                 process = subprocess.Popen(['python3', 'IPAdapterFaceIDPortrait.py', '--discribe' ,discribe_msg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 stdout, stderr = process.communicate()
                 if process.returncode == 0:
