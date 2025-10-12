@@ -23,10 +23,10 @@ class WebSocketClient:
             # 只有当JSON中有特定指令时才执行
             if json_data.get('action') == 'image2image':
                 # 提示词
-                prompt = "outdoor portrait photography, beautiful woman in natural setting, golden hour sunlight"
+                prompt = discribe_msg
 
                 # 图片URL
-                image_url = "http://120.27.130.190:8091/api/files/download/14d1ea3f-07ea-4302-afff-adc3e6d03c0e_tmpx4_5ndmd.png"
+                image_url = json_data["imageUrl"]
 
                 # 调用图片生成函数
                 result = generate_image_from_url_and_prompt(prompt, image_url)
