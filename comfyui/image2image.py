@@ -1,3 +1,4 @@
+# 导入必要的库
 import websocket
 import uuid
 import json
@@ -90,11 +91,12 @@ def upload_image(image_path):
         url = f"http://{server_address}/upload/image"
         filename = os.path.basename(image_path)
         
-        # 使用files参数以multipart/form-data格式上传
-        with open(image_path, "rb") as f:
-            files = {'image': (filename, f)}
-            response = requests.post(url, files=files)
-            
+        # 确保文件在上传前完全读取并关闭
+        with open(image_path, "rb") as file:
+            files = {'image': (filename, file.read())}
+        
+        response = requests.post(url, files=files)
+        
         # 检查响应状态
         response.raise_for_status()
         result = response.json()
@@ -266,8 +268,7 @@ def generate_image_from_url_and_prompt(prompt_text, image_url, workflow_path=Non
             prompt = load_workflow_from_json(workflow_path, custom_prompt=prompt_text, image_filename=image_filename)
             
             # 4. 创建WebSocket连接到服务器
-            ws = websocket.WebSocket()
-            ws.connect(f"ws://{server_address}/ws?clientId={client_id}")
+            ws = websocket.create_connection(f"ws://{server_address}/ws?clientId={client_id}")
             
             # 5. 获取生成的图像
             images = get_images(ws, prompt)
@@ -339,13 +340,21 @@ def uploadImage(image):
         image.save(tmp_file)
         tmp_file_path = tmp_file.name
     
-    files = {'file': open(tmp_file_path, 'rb')}
-    data = {
-        'description': "自动生成的图片",
-        'category': '',  # 可根据实际情况修改
-        'tags': ''  # 可根据实际情况修改
-    }
+    # 确保文件在上传前完全读取并关闭
+    file_data = None
     try:
+        # 先读取文件内容到内存
+        with open(tmp_file_path, 'rb') as file:
+            file_data = file.read()
+        
+        # 此时文件已经关闭，不再持有文件句柄
+        files = {'file': ('temp_image.png', file_data)}
+        data = {
+            'description': "自动生成的图片",
+            'category': '',  # 可根据实际情况修改
+            'tags': ''  # 可根据实际情况修改
+        }
+        
         response = requests.post('http://120.27.130.190:8091/api/files/upload', files=files, data=data)
         response.raise_for_status()
         result = response.json()
@@ -360,8 +369,10 @@ def uploadImage(image):
         print(f'文件上传失败: {e}')
         return {'error': str(e)}
     finally:
+        # 确保清理临时文件
         import os
-        os.remove(tmp_file_path)
+        if os.path.exists(tmp_file_path):
+            os.remove(tmp_file_path)
 
 
 def main():
@@ -382,8 +393,7 @@ def main():
         prompt = load_workflow_from_json(workflow_path, custom_prompt=default_prompt, image_filename=image_filename)
         
         # 创建一个WebSocket连接到服务器
-        ws = websocket.WebSocket()
-        ws.connect("ws://{}/ws?clientId={}".format(server_address, client_id))
+        ws = websocket.create_connection("ws://{}/ws?clientId={}".format(server_address, client_id))
         
         # 调用get_images()函数来获取图像
         images = get_images(ws, prompt)
