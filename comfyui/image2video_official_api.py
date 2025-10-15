@@ -488,8 +488,13 @@ class ComfyUIVideoGenerator:
             raise
     
     def track_progress(self, prompt_id):
-        """通过WebSocket跟踪任务执行进度"""
+        """通过WebSocket跟踪任务执行进度并返回执行状态"""
         global should_continue
+        result = {
+            'success': False,
+            'message': '',
+            'prompt_id': prompt_id
+        }
         
         try:
             # 创建WebSocket连接
@@ -503,10 +508,11 @@ class ComfyUIVideoGenerator:
                     # 接收WebSocket消息
                     message = ws.recv()
                     if not message:
+                        print("\nsocket 消息不存在")
                         continue
-                    
                     # 解析消息
                     message_data = json.loads(message)
+                    print("\n消息类型", message_data.get('type'))
                     
                     # 处理进度消息
                     if message_data.get('type') == 'progress':
@@ -516,28 +522,59 @@ class ComfyUIVideoGenerator:
                             node_id = progress_data.get('node_id', '未知')
                             print(f"正在执行节点: {node_id} ({progress_percent:.1f}%)", end="\r")
                     
-                    # 处理执行状态消息
+                    # 处理执行状态消息 - 新增：处理execution_success消息
+                    elif message_data.get('type') == 'execution_success':
+                        print("\n视频生成成功完成！")
+                        result['success'] = True
+                        result['message'] = '视频生成成功'
+                        return result
+                    
+                    # 处理执行状态消息 - 原有的idle状态检测
                     elif message_data.get('type') == 'execution_state':
                         if message_data.get('data') == 'idle':
                             print("\n视频生成完成")
-                            break
+                            # 这里我们不能直接判断成功，需要后续通过历史记录检查
+                            result['success'] = True
+                            result['message'] = '视频生成完成'
+                            return result
                     
                     # 处理错误消息
                     elif message_data.get('type') == 'execution_error':
                         error_msg = message_data.get('data', {}).get('error', '未知错误')
                         print(f"\n执行错误: {error_msg}")
-                        raise Exception(f"执行错误: {error_msg}")
+                        result['success'] = False
+                        result['error'] = error_msg
+                        result['message'] = '视频生成过程中发生错误'
+                        return result
                 except websocket.WebSocketTimeoutException:
                     # WebSocket超时，继续等待
                     continue
                 except websocket.WebSocketConnectionClosedException:
                     print("\nWebSocket连接已关闭")
-                    break
+                    result['success'] = False
+                    result['error'] = 'WebSocket连接已关闭'
+                    result['message'] = '与服务器的连接意外关闭'
+                    return result
                 except json.JSONDecodeError:
                     # 消息不是有效的JSON，忽略
+                    print("\n 消息不是有效的JSON")
                     continue
+            
+            # 如果循环正常结束但没有明确的成功/失败标志，可能是被中断
+            if not should_continue:
+                result['success'] = False
+                result['error'] = '操作被用户中断'
+                result['message'] = '视频生成被用户中断'
+                return result
+                
+            return result
+            
         except Exception as e:
             print(f"跟踪进度出错: {str(e)}")
+            result['success'] = False
+            result['error'] = str(e)
+            result['message'] = '跟踪进度过程中发生异常'
+            return result
         finally:
             # 关闭WebSocket连接
             try:
