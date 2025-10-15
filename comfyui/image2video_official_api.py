@@ -626,6 +626,64 @@ class ComfyUIVideoGenerator:
         except Exception as e:
             print(f"下载视频失败: {str(e)}")
             raise
+    
+    def upload_video_to_api(self, video_path):
+        """上传视频到指定接口"""
+        try:
+            print(f"准备上传视频: {video_path}")
+            
+            # 读取视频文件数据
+            with open(video_path, 'rb') as f:
+                file_data = f.read()
+            
+            # 此时文件已经关闭，不再持有文件句柄
+            files = {'file': ('temp_image.mp4', file_data)}
+            data = {
+                'description': "自动生成的图片",
+                'category': '',  # 可根据实际情况修改
+                'tags': ''  # 可根据实际情况修改
+            }
+            
+            # 上传到指定接口
+            print(f"正在上传视频到接口...")
+            upload_url = 'http://120.27.130.190:8091/api/files/upload'
+            response = requests.post(upload_url, files=files, data=data)
+            
+            # 检查响应
+            response.raise_for_status()
+            
+            # 解析响应结果
+            try:
+                result = response.json()
+                print(f"上传响应 (JSON): {result}")
+                return {
+                    'success': True,
+                    'message': '视频上传成功',
+                    'response': result
+                }
+            except json.JSONDecodeError:
+                # 如果响应不是JSON格式，返回文本
+                print(f"上传响应 (Text): {response.text}")
+                return {
+                    'success': True,
+                    'message': '视频上传成功',
+                    'response_text': response.text
+                }
+        
+        except requests.exceptions.HTTPError as e:
+            error_info = f"HTTP错误: {e.response.status_code} - {e.response.text}"
+            print(f"视频上传失败: {error_info}")
+            return {
+                'success': False,
+                'error': error_info
+            }
+        except Exception as e:
+            error_info = f"上传过程出错: {str(e)}"
+            print(f"视频上传失败: {error_info}")
+            return {
+                'success': False,
+                'error': error_info
+            }
 
     def generate_video(self, workflow_path, image_path, custom_prompt=None, negative_prompt=None, save_to_local=True, save_directory=None):
         """生成视频的主函数"""
@@ -837,6 +895,47 @@ class ComfyUIVideoGenerator:
                 result['success'] = False
                 result['error'] = '没有生成视频或图像帧'
                 result['message'] = '视频生成失败: 没有生成视频或图像帧'
+            
+            # 添加视频上传功能
+            if result.get('success', False):
+                print(f"视频开始上传。。。")
+                
+                # 直接从ComfyUI的output/video文件夹中查找最新的视频文件
+                video_path = None
+                try:
+                    # 使用用户提供的正确ComfyUI视频输出目录路径
+                    comfyui_video_dir = "C:\\LLM\\ComfyUI_windows_portable\\ComfyUI\\output\\video"
+                    
+                    # 检查目录是否存在
+                    if os.path.exists(comfyui_video_dir) and os.path.isdir(comfyui_video_dir):
+                        # 获取目录中的所有视频文件
+                        video_files = [f for f in os.listdir(comfyui_video_dir) if f.endswith(('.mp4', '.avi', '.mov', '.mkv'))]
+                        
+                        if video_files:
+                            # 按修改时间排序，获取最新的视频文件
+                            video_files.sort(key=lambda x: os.path.getmtime(os.path.join(comfyui_video_dir, x)), reverse=True)
+                            video_path = os.path.join(comfyui_video_dir, video_files[0])
+                            result['local_video_path'] = video_path
+                            print(f"从output/video文件夹找到最新视频文件: {video_path}")
+                        else:
+                            print("警告: ComfyUI的output/video文件夹中没有找到视频文件")
+                    else:
+                        print(f"警告: ComfyUI的output/video文件夹不存在: {comfyui_video_dir}")
+                except Exception as e:
+                    print(f"查找视频文件时出错: {str(e)}")
+                
+                # 如果找到了视频文件，上传到指定接口
+                if video_path and os.path.exists(video_path):
+                    try:
+                        upload_result = self.upload_video_to_api(video_path)
+                        result['upload_result'] = upload_result
+                        if upload_result.get('success'):
+                            print(f"视频上传成功: {upload_result.get('message')}")
+                        else:
+                            print(f"视频上传失败: {upload_result.get('error')}")
+                    except Exception as e:
+                        print(f"视频上传过程中出错: {str(e)}")
+                        result['upload_error'] = str(e)
             
             return result
         except Exception as e:
