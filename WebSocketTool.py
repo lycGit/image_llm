@@ -3,6 +3,7 @@ import threading
 import json
 
 from comfyui.image2image import generate_image_from_url_and_prompt
+from comfyui.image2video_official_api import generate_video_from_prompt_and_url
 
 
 class WebSocketClient:
@@ -46,6 +47,31 @@ class WebSocketClient:
                         self.send_message(json_str)
                 else:
                     print(f"图片生成失败: {result['error']}")
+            if json_data.get('action') == 'image2video':
+                # 提示词
+                prompt = discribe_msg
+
+                # 图片URL
+                image_url = json_data["imageUrl"]
+
+                # 调用图片生成函数
+                result = generate_video_from_prompt_and_url(prompt, image_url)
+
+                if result['success']:
+                    print("图片生成成功!")
+                    # 访问结果
+                    for i, item in enumerate(result['results']):
+                        print(f"结果 {i + 1}: {item['upload_result']}")
+                        data = {
+                            'targetUserId': json_data.get('userId'),
+                            "userId": json_data.get('userId'),
+                            "msg": "图片已创建完成",
+                            "imageUrl": item['upload_result'].get('imageUrl1'),
+                        }
+                        json_str = json.dumps(data, ensure_ascii=False, indent=4)
+                        self.send_message(json_str)
+                else:
+                    print(f"视频生成失败: {result['error']}")
             elif json_data.get('action') == 'IPAdapterFaceIDPortrait':
                 process = subprocess.Popen(['python3', 'IPAdapterFaceIDPortrait.py', '--discribe' ,discribe_msg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 stdout, stderr = process.communicate()
