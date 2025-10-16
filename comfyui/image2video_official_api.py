@@ -1017,7 +1017,7 @@ def generate_video_from_prompt_and_url(prompt, image_url, negative_prompt=None):
         negative_prompt (str, optional): 负面提示词，默认为通用设置
     
     返回:
-        dict: 包含视频生成结果的字典，包括success状态、帧数、视频信息等
+        dict: 包含视频生成结果的字典，包括success状态、帧数、视频信息以及上传结果等
     """
     # 默认负面提示词
     if negative_prompt is None:
@@ -1043,7 +1043,21 @@ def generate_video_from_prompt_and_url(prompt, image_url, negative_prompt=None):
             negative_prompt=negative_prompt
         )
         
-        # 返回生成结果
+        # 检查并记录上传结果
+        if 'upload_result' in result:
+            upload_result = result['upload_result']
+            print(f"视频上传结果: {upload_result}")
+            # 确保上传结果中的success、message和response字段存在
+            if upload_result.get('success'):
+                print(f"✅ 视频上传成功: {upload_result.get('message')}")
+                if 'response' in upload_result:
+                    print(f"   上传响应详情: {upload_result['response']}")
+            else:
+                print(f"❌ 视频上传失败: {upload_result.get('error', '未知错误')}")
+        else:
+            print("⚠️  未找到视频上传结果")
+        
+        # 返回完整结果，包括上传信息
         return result
     except Exception as e:
         # 捕获异常并返回错误信息
