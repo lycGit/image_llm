@@ -1006,19 +1006,35 @@ def generate_video_example():
             except:
                 pass
 
-# 从URL和提示词生成视频的函数
-def generate_video_from_url_and_prompt(prompt, image_url, negative_prompt=None):
-    """从URL和提示词生成视频"""
+
+def generate_video_from_prompt_and_url(prompt, image_url, negative_prompt=None):
+    """
+    对外提供的简化接口，只需要传入提示词和图片URL即可生成视频并返回结果
+    
+    参数:
+        prompt (str): 视频生成的提示词
+        image_url (str): 输入图片的URL
+        negative_prompt (str, optional): 负面提示词，默认为通用设置
+    
+    返回:
+        dict: 包含视频生成结果的字典，包括success状态、帧数、视频信息等
+    """
+    # 默认负面提示词
+    if negative_prompt is None:
+        negative_prompt = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止"
+    
     # 创建视频生成器实例
     video_generator = ComfyUIVideoGenerator()
     
     # 工作流文件路径
     workflow_path = os.path.join(os.path.dirname(__file__), 'workflows', 'video_wan2_2_14B_i2v.json')
     
-    # 下载图片
-    image_path = download_image_from_url(image_url)
-    
+    # 从URL下载图片
+    image_path = None
     try:
+        # 下载图片
+        image_path = download_image_from_url(image_url)
+        
         # 生成视频
         result = video_generator.generate_video(
             workflow_path=workflow_path,
@@ -1027,13 +1043,20 @@ def generate_video_from_url_and_prompt(prompt, image_url, negative_prompt=None):
             negative_prompt=negative_prompt
         )
         
+        # 返回生成结果
         return result
     except Exception as e:
-        return {
+        # 捕获异常并返回错误信息
+        error_info = {
             'success': False,
             'error': str(e),
-            'message': '视频生成失败'
+            'message': '视频生成过程中出现异常',
+            'frames_count': 0,
+            'has_output': False
         }
+        import traceback
+        traceback.print_exc()  # 打印详细错误栈以便调试
+        return error_info
     finally:
         # 清理临时文件
         if image_path and os.path.exists(image_path):
@@ -1041,6 +1064,9 @@ def generate_video_from_url_and_prompt(prompt, image_url, negative_prompt=None):
                 os.remove(image_path)
             except:
                 pass
+
+# 注意：generate_video_from_url_and_prompt函数已被更完善的generate_video_from_prompt_and_url函数替代
+# 请使用generate_video_from_prompt_and_url函数获取更好的错误处理和更详细的返回信息
 
 # 使用本地图片生成视频的函数
 def generate_video_from_local_image(image_path, prompt, negative_prompt=None):
