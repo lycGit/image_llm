@@ -54,24 +54,57 @@ class WebSocketClient:
                 # 图片URL
                 image_url = json_data["imageUrl"]
 
-                # 调用图片生成函数
+                # 调用视频生成函数
                 result = generate_video_from_prompt_and_url(prompt, image_url)
 
                 if result['success']:
-                    print("图片生成成功!")
-                    # 访问结果
-                    for i, item in enumerate(result['results']):
-                        print(f"结果 {i + 1}: {item['upload_result']}")
+                    print("视频生成成功!")
+                    # 直接使用upload_result
+                    if 'upload_result' in result and result['upload_result'].get('success'):
+                        print(f"上传结果: {result['upload_result']}")
+                        # 尝试获取视频URL
+                        video_url = ""
+                        # 从response字典中直接提取imageUrl1字段
+                        if 'response' in result['upload_result']:
+                            response_data = result['upload_result']['response']
+                            # 确保response_data是字典格式
+                            if isinstance(response_data, dict):
+                                video_url = response_data.get('imageUrl1', '')
+                                # 清理可能的空格和反引号
+                                if video_url:
+                                    video_url = video_url.strip().strip('`')
+                            print(f"从响应中提取的视频URL: {video_url}")
+                        
                         data = {
                             'targetUserId': json_data.get('userId'),
                             "userId": json_data.get('userId'),
-                            "msg": "图片已创建完成",
-                            "imageUrl": item['upload_result'].get('imageUrl1'),
+                            "msg": "视频已创建完成",
+                            "videoUrl": video_url,
+                        }
+                        json_str = json.dumps(data, ensure_ascii=False, indent=4)
+                        self.send_message(json_str)
+                    else:
+                        print("视频上传失败或未找到上传结果")
+                        # 即使上传失败也发送成功消息
+                        data = {
+                            'targetUserId': json_data.get('userId'),
+                            "userId": json_data.get('userId'),
+                            "msg": "视频已创建完成，但上传失败",
+                            "videoUrl": "",
                         }
                         json_str = json.dumps(data, ensure_ascii=False, indent=4)
                         self.send_message(json_str)
                 else:
-                    print(f"视频生成失败: {result['error']}")
+                    print(f"视频生成失败: {result.get('error', '未知错误')}")
+                    # 发送失败消息
+                    data = {
+                        'targetUserId': json_data.get('userId'),
+                        "userId": json_data.get('userId'),
+                        "msg": "视频生成失败",
+                        "error": result.get('error', '未知错误'),
+                    }
+                    json_str = json.dumps(data, ensure_ascii=False, indent=4)
+                    self.send_message(json_str)
             elif json_data.get('action') == 'IPAdapterFaceIDPortrait':
                 process = subprocess.Popen(['python3', 'IPAdapterFaceIDPortrait.py', '--discribe' ,discribe_msg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 stdout, stderr = process.communicate()
