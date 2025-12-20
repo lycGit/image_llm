@@ -22,7 +22,17 @@ class WebSocketClient:
             print("成功解析为JSON对象:", json_data)
             discribe_msg = json_data["msg"]
             # 只有当JSON中有特定指令时才执行
-            if json_data.get('action') == 'image2image':
+            if json_data.get('action') == 'isLLMOnLine':
+                data = {
+                    'targetUserId': json_data.get('userId'),
+                    "userId": json_data.get('userId'),
+                    "msg": "pong",
+                    "imageUrl": "",
+                }
+                json_str = json.dumps(data, ensure_ascii=False, indent=4)
+                self.send_message(json_str)
+
+            elif json_data.get('action') == 'image2image':
                 # 提示词
                 prompt = discribe_msg
 
