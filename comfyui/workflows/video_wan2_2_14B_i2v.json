@@ -116,7 +116,7 @@
   },
   "93": {
     "inputs": {
-      "text": "The white dragon warrior stands still, eyes full of determination and strength. The camera slowly moves closer or circles around the warrior, highlighting the powerful presence and heroic spirit of the character.",
+      "text": "",
       "clip": [
         "84",
         0
@@ -171,8 +171,8 @@
   },
   "98": {
     "inputs": {
-      "width": 160,
-      "height": 160,
+      "width": 640,
+      "height": 640,
       "length": 81,
       "batch_size": 1,
       "positive": [
