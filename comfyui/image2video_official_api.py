@@ -632,6 +632,10 @@ class ComfyUIVideoGenerator:
         try:
             print(f"准备上传视频: {video_path}")
             
+            # 获取文件大小
+            file_size = os.path.getsize(video_path)
+            print(f"文件大小: {file_size / 1024 / 1024:.2f} MB")
+            
             # 读取视频文件数据
             with open(video_path, 'rb') as f:
                 file_data = f.read()
@@ -644,10 +648,13 @@ class ComfyUIVideoGenerator:
                 'tags': ''  # 可根据实际情况修改
             }
             
-            # 上传到指定接口
+            # 上传到指定接口，增加超时时间为5分钟
             print(f"正在上传视频到接口...")
             upload_url = 'http://120.27.130.190:8091/api/files/upload'
-            response = requests.post(upload_url, files=files, data=data)
+            
+            # 使用更长的超时时间，大文件需要更长时间上传
+            # 连接超时30秒，读取超时300秒（5分钟）
+            response = requests.post(upload_url, files=files, data=data, timeout=(30, 300))
             
             # 检查响应
             response.raise_for_status()
@@ -670,8 +677,22 @@ class ComfyUIVideoGenerator:
                     'response_text': response.text
                 }
         
+        except requests.exceptions.Timeout as e:
+            error_info = f"上传超时: {str(e)}"
+            print(f"视频上传失败: {error_info}")
+            return {
+                'success': False,
+                'error': error_info
+            }
         except requests.exceptions.HTTPError as e:
             error_info = f"HTTP错误: {e.response.status_code} - {e.response.text}"
+            print(f"视频上传失败: {error_info}")
+            return {
+                'success': False,
+                'error': error_info
+            }
+        except requests.exceptions.ConnectionError as e:
+            error_info = f"连接错误: {str(e)}"
             print(f"视频上传失败: {error_info}")
             return {
                 'success': False,
