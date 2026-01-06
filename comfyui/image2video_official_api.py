@@ -627,134 +627,80 @@ class ComfyUIVideoGenerator:
             print(f"下载视频失败: {str(e)}")
             raise
     
-    def upload_video_to_api(self, video_path, chunk_size=512 * 1024):
-        """上传视频到指定接口，支持大文件分块上传
-        
-        Args:
-            video_path: 视频文件路径
-            chunk_size: 分块大小，默认512KB
-            
-        Returns:
-            上传结果字典
-        """
+    def upload_video_to_api(self, video_path):
+        """上传视频到指定接口"""
         try:
             print(f"准备上传视频: {video_path}")
-            
-            # 检查文件是否存在
-            if not os.path.exists(video_path):
-                raise FileNotFoundError(f"视频文件不存在: {video_path}")
             
             # 获取文件大小
             file_size = os.path.getsize(video_path)
             print(f"文件大小: {file_size / 1024 / 1024:.2f} MB")
             
-            # 如果文件小于等于chunk_size，直接上传
-            if file_size <= chunk_size:
-                print("文件较小，直接上传...")
-                return self._upload_single_chunk(video_path)
-            
-            # 否则进行分块上传
-            print(f"文件较大，开始分块上传...")
-            upload_url = 'http://120.27.130.190:8091/api/files/upload'
-            
-            # 获取原始文件名
-            original_filename = os.path.basename(video_path)
-            print(f"原始文件名: {original_filename}")
-            
-            # 分块上传
+            # 读取视频文件数据
             with open(video_path, 'rb') as f:
-                chunk_index = 0
-                
-                while True:
-                    # 读取一块数据
-                    chunk_data = f.read(chunk_size)
-                    
-                    if not chunk_data:
-                        break  # 文件读取完毕
-                    
-                    chunk_index += 1
-                    print(f"正在上传第 {chunk_index} 块，大小: {len(chunk_data) / 1024:.2f} KB")
-                    
-                    # 创建临时文件保存当前块
-                    temp_chunk_path = f"/tmp/{original_filename}_chunk_{chunk_index}.mp4"
-                    with open(temp_chunk_path, 'wb') as chunk_file:
-                        chunk_file.write(chunk_data)
-                    
-                    try:
-                        # 上传当前块
-                        result = self._upload_single_chunk(temp_chunk_path)
-                        
-                        if not result['success']:
-                            return result
-                            
-                        print(f"第 {chunk_index} 块上传成功")
-                    finally:
-                        # 删除临时文件
-                        if os.path.exists(temp_chunk_path):
-                            os.remove(temp_chunk_path)
+                file_data = f.read()
             
-            # 所有块上传完成
-            return {
-                'success': True,
-                'message': '视频分块上传完成'
+            # 此时文件已经关闭，不再持有文件句柄
+            files = {'file': ('temp_image.mp4', file_data)}
+            data = {
+                'description': "自动生成的图片",
+                'category': '',  # 可根据实际情况修改
+                'tags': ''  # 可根据实际情况修改
             }
-        
-        except Exception as e:
-            error_info = f"视频上传失败: {str(e)}"
-            print(error_info)
-            return {
-                'success': False,
-                'error': error_info
-            }
-    
-    def _upload_single_chunk(self, file_path):
-        """上传单个文件块
-        
-        Args:
-            file_path: 文件块路径
             
-        Returns:
-            上传结果字典
-        """
-        try:
-            original_filename = os.path.basename(file_path)
-            
+            # 上传到指定接口，增加超时时间为5分钟
+            print(f"正在上传视频到接口...")
             upload_url = 'http://120.27.130.190:8091/api/files/upload'
             
-            with open(file_path, 'rb') as f:
-                files = {'file': (original_filename, f)}
-                data = {
-                    'description': "视频文件块"
-                }
-                
-                # 使用较短的超时时间
-                response = requests.post(
-                    upload_url, 
-                    files=files, 
-                    data=data
-                )
-                
-                # 检查响应
-                print(f"块上传响应状态码: {response.status_code}")
-                
-                response.raise_for_status()
-                
-                # 解析响应
+            # 使用更长的超时时间，大文件需要更长时间上传
+            # 连接超时30秒，读取超时300秒（5分钟）
+            response = requests.post(upload_url, files=files, data=data, timeout=(30, 300))
+            
+            # 检查响应
+            response.raise_for_status()
+            
+            # 解析响应结果
+            try:
                 result = response.json()
-                
+                print(f"上传响应 (JSON): {result}")
                 return {
                     'success': True,
+                    'message': '视频上传成功',
                     'response': result
                 }
+            except json.JSONDecodeError:
+                # 如果响应不是JSON格式，返回文本
+                print(f"上传响应 (Text): {response.text}")
+                return {
+                    'success': True,
+                    'message': '视频上传成功',
+                    'response_text': response.text
+                }
         
+        except requests.exceptions.Timeout as e:
+            error_info = f"上传超时: {str(e)}"
+            print(f"视频上传失败: {error_info}")
+            return {
+                'success': False,
+                'error': error_info
+            }
         except requests.exceptions.HTTPError as e:
-            error_info = f"块上传HTTP错误: {e.response.status_code} - {e.response.text}"
+            error_info = f"HTTP错误: {e.response.status_code} - {e.response.text}"
+            print(f"视频上传失败: {error_info}")
+            return {
+                'success': False,
+                'error': error_info
+            }
+        except requests.exceptions.ConnectionError as e:
+            error_info = f"连接错误: {str(e)}"
+            print(f"视频上传失败: {error_info}")
             return {
                 'success': False,
                 'error': error_info
             }
         except Exception as e:
-            error_info = f"块上传失败: {str(e)}"
+            error_info = f"上传过程出错: {str(e)}"
+            print(f"视频上传失败: {error_info}")
             return {
                 'success': False,
                 'error': error_info
@@ -1190,28 +1136,3 @@ def generate_video_from_local_image(image_path, prompt, negative_prompt=None):
 if __name__ == "__main__":
     # 运行示例
     generate_video_example()
-    
-    # 修复：必须先创建ComfyUIVideoGenerator实例，然后通过实例调用upload_video_to_api方法
-    # video_generator = ComfyUIVideoGenerator()
-    #
-    # # 测试视频文件路径
-    # video_path = "/Users/lyc/Downloads/ComfyUI_00082_.mp4"
-    #
-    # # 检查文件是否存在
-    # if os.path.exists(video_path):
-    #     print(f"准备测试上传视频文件: {video_path}")
-    #     print(f"文件大小: {os.path.getsize(video_path) / 1024 / 1024:.2f} MB")
-    #
-    #     # 调用实例方法上传视频
-    #     result = video_generator.upload_video_to_api(video_path)
-    #
-    #     # 打印结果
-    #     if result['success']:
-    #         print("视频上传成功！")
-    #         print(f"上传结果: {result}")
-    #     else:
-    #         print("视频上传失败！")
-    #         print(f"错误信息: {result.get('error', '未知错误')}")
-    # else:
-    #     print(f"测试文件不存在: {video_path}")
-    #     print("请修改video_path为实际存在的视频文件路径")
