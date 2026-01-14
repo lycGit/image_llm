@@ -167,6 +167,28 @@ class ComfyUIVideoGenerator:
                 if node_type == 'LoadImage' and image_filename:
                     prompt[node_id]["inputs"]["image"] = image_filename
                 
+                # 处理CLIPTextEncode节点的提示词替换
+                elif node_type == 'CLIPTextEncode':
+                    # 获取原始提示词
+                    original_prompt = node_data.get('inputs', {}).get('text', '')
+                    # 判断是否是正面提示节点
+                    is_positive = False
+                    node_title = node_data.get('_meta', {}).get('title', '')
+                    if node_title and "Positive" in node_title:
+                        is_positive = True
+                    elif "white dragon warrior" in original_prompt and not "色调艳丽" in original_prompt:
+                        is_positive = True
+                    
+                    if is_positive:
+                        # 使用自定义提示语或原始提示语
+                        prompt[node_id]["inputs"]["text"] = custom_prompt if custom_prompt else original_prompt
+                    elif node_title and "Negative" in node_title or "色调艳丽" in original_prompt:
+                        # 处理负面提示语
+                        prompt[node_id]["inputs"]["text"] = negative_prompt if negative_prompt else original_prompt
+                    else:
+                        # 其他文本节点保持原样
+                        prompt[node_id]["inputs"]["text"] = original_prompt
+                
                 # 处理KSamplerAdvanced节点的type参数
                 elif node_type == 'KSamplerAdvanced' and node_id == '38':
                     if 'type' not in prompt[node_id]["inputs"]:
@@ -983,7 +1005,7 @@ def generate_video_example():
     # image_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets', 'images', 'girl.png')
     
     # 从URL下载图片示例
-    image_url = "http://120.27.130.190:8091/api/files/download/14d1ea3f-07ea-4302-afff-adc3e6d03c0e_tmpx4_5ndmd.png"
+    image_url = "http://120.27.130.190:8091/api/files/download/6b04217c-4372-4062-bb39-46da0c1786e2_temp_image.png"
     image_path = download_image_from_url(image_url)
     
     try:
