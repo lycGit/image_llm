@@ -1,0 +1,1122 @@
+import json
+import requests
+import websocket
+import uuid
+import urllib.request
+import urllib.parse
+import os
+import tempfile
+import signal
+import sys
+import time
+
+# 设置服务器地址
+COMFYUI_SERVER_URL = "http://127.0.0.1:8188"
+WEBSOCKET_URL = "ws://127.0.0.1:8188/ws"
+
+# 标志变量，用于控制程序是否继续运行
+should_continue = True
+
+
+
+# 设置服务器地址和客户端
+server_address = "127.0.0.1:8188"
+client_id = str(uuid.uuid4())
+
+# 标志变量，用于控制程序是否继续运行
+should_continue = True
+
+# 信号处理函数，用于优雅地处理中断
+def signal_handler(sig, frame):
+    global should_continue
+    print('\n程序被中断，正在清理资源...')
+    should_continue = False
+
+# 注册信号处理函数
+signal.signal(signal.SIGINT, signal_handler)
+
+# 下载图片的辅助函数
+def download_image_from_url(image_url):
+    """从URL下载图片并保存到临时文件"""
+    try:
+        # 创建临时文件
+        temp_dir = tempfile.gettempdir()
+        temp_filename = f"temp_image_{uuid.uuid4().hex}.png"
+        temp_path = os.path.join(temp_dir, temp_filename)
+        
+        print(f"正在从URL下载图片: {image_url}")
+        
+        # 使用urllib或requests下载图片
+        try:
+            # 优先使用requests
+            response = requests.get(image_url, timeout=30)
+            response.raise_for_status()  # 如果响应状态码不是200，抛出异常
+            
+            # 保存图片
+            with open(temp_path, 'wb') as f:
+                f.write(response.content)
+        except ImportError:
+            # 如果没有requests库，使用urllib
+            urllib.request.urlretrieve(image_url, temp_path)
+        
+        print(f"图片下载成功，保存至: {temp_path}")
+        return temp_path
+    except Exception as e:
+        print(f"下载图片失败: {str(e)}")
+        # 尝试使用本地默认图片
+        default_image_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets', 'images', 'girl.png')
+        if os.path.exists(default_image_path):
+            print(f"使用默认图片: {default_image_path}")
+            return default_image_path
+        else:
+            raise Exception(f"下载图片失败且找不到默认图片: {str(e)}")
+
+
+
+# ComfyUIVideoGenerator类
+class ComfyUIVideoGenerator:
+    def __init__(self, server_url="http://127.0.0.1:8188"):
+        """初始化ComfyUIVideoGenerator"""
+        self.server_url = server_url
+        self.client_id = str(uuid.uuid4())
+        
+    def _handle_http_exception(self, e):
+        """处理HTTP异常，提取详细的错误信息"""
+        try:
+            # 尝试获取错误代码
+            status_code = e.code if hasattr(e, 'code') else "未知"
+            
+            # 尝试获取错误原因
+            reason = e.reason if hasattr(e, 'reason') else "未知"
+            
+            # 尝试获取错误详情
+            error_text = ""
+            try:
+                if hasattr(e, 'read'):
+                    error_content = e.read().decode('utf-8')
+                    # 尝试解析JSON格式的错误信息
+                    try:
+                        error_json = json.loads(error_content)
+                        error_text = json.dumps(error_json, ensure_ascii=False, indent=2)
+                    except json.JSONDecodeError:
+                        error_text = error_content
+            except Exception:
+                error_text = "无法读取错误详情"
+            
+            return {
+                'status_code': status_code,
+                'reason': reason,
+                'error_text': error_text
+            }
+        except Exception:
+            return {
+                'status_code': "未知",
+                'reason': "未知",
+                'error_text': str(e)
+            }
+    
+    def load_workflow(self, workflow_path):
+        """加载工作流配置"""
+        try:
+            if not os.path.exists(workflow_path):
+                raise FileNotFoundError(f"工作流文件不存在: {workflow_path}")
+            
+            with open(workflow_path, 'r', encoding='utf-8') as f:
+                workflow_data = json.load(f)
+            
+            return workflow_data
+        except json.JSONDecodeError as e:
+            print(f"解析工作流文件失败: {str(e)}")
+            raise
+        except Exception as e:
+            print(f"加载工作流失败: {str(e)}")
+            raise
+    
+    def prepare_prompt(self, workflow_data, custom_prompt=None, negative_prompt=None):
+        """准备提示词配置，将工作流转换为ComfyUI需要的格式"""
+        # 添加调试信息
+        print(f"prepare_prompt方法调用:")
+        print(f"  自定义提示词: {custom_prompt}")
+        print(f"  负面提示词: {negative_prompt}")
+        print(f"  工作流数据类型: {type(workflow_data)}")
+        
+        # 检查工作流数据结构
+        if isinstance(workflow_data, dict):
+            # 直接使用字典格式的工作流
+            prompt = {}
+            
+            # 处理节点
+            for node_id, node_data in workflow_data.items():
+                node_type = node_data.get('class_type')
+                if not node_type:
+                    continue
+                
+                # 构建节点结构
+                prompt[node_id] = {
+                    "inputs": {},
+                    "class_type": node_type
+                }
+                
+                # 获取输入列表
+                inputs = node_data.get('inputs', {})
+                for input_name, input_value in inputs.items():
+                    # 保留现有链接和值
+                    prompt[node_id]["inputs"][input_name] = input_value
+                
+                # 处理widgets_values
+                widget_inputs = []
+                if '_meta' in node_data and 'widgets' in node_data['_meta']:
+                    # 如果有元数据，获取widgets信息
+                    widget_inputs = [w['name'] for w in node_data['_meta']['widgets']]
+                
+                # 处理节点参数
+                self._process_node_parameters(node_id, node_type, node_data, widget_inputs, prompt, custom_prompt, negative_prompt)
+        else:
+            # 旧格式工作流数据处理（列表格式）
+            prompt = {}
+            valid_nodes = []
+            
+            # 收集所有节点
+            for node in workflow_data:
+                node_id = str(node.get('id', ''))
+                if not node_id:
+                    continue
+                
+                node_type = node.get('class_type')
+                if not node_type:
+                    continue
+                
+                # 构建节点结构
+                prompt[node_id] = {
+                    "inputs": {},
+                    "class_type": node_type
+                }
+                
+                # 记录有效节点
+                valid_nodes.append(node)
+                
+                # 获取输入列表
+                widget_inputs = []
+                if '_meta' in node and 'widgets' in node['_meta']:
+                    # 如果有元数据，获取widgets信息
+                    widget_inputs = [w['name'] for w in node['_meta']['widgets']]
+                
+                # 处理节点参数
+                self._process_node_parameters(node_id, node_type, node, widget_inputs, prompt, custom_prompt, negative_prompt)
+            
+            # 处理节点之间的链接
+            self._process_node_links(workflow_data, prompt, valid_nodes)
+        
+        # 确保有输出节点
+        self._ensure_has_output_nodes(prompt)
+        
+        return prompt
+        
+    def _ensure_has_output_nodes(self, prompt):
+        """确保提示词中包含输出节点, 防止出现'Prompt has no outputs'错误"""
+        # 检查是否已经包含SaveImage、SaveVideo或其他输出类型的节点
+        has_output_node = False
+        
+        for node_id, node_data in prompt.items():
+            node_type = node_data.get('class_type', '')
+            if node_type in ['SaveImage', 'SaveVideo']:
+                has_output_node = True
+                break
+        
+        # 如果没有输出节点，添加一个输出节点（根据工作流类型选择合适的输出节点）
+        if not has_output_node:
+            # 查找最后一个可能产生输出的节点
+            last_output_node = None
+            last_output_node_id = None
+            
+            for node_id, node_data in prompt.items():
+                node_type = node_data.get('class_type', '')
+                if node_type in ['VAEDecode', 'CreateVideo', 'WanImageToVideo']:
+                    last_output_node = node_data
+                    last_output_node_id = node_id
+            
+            if last_output_node and last_output_node_id:
+                # 根据最后一个输出节点的类型添加对应的保存节点
+                if last_output_node.get('class_type') == 'CreateVideo':
+                    # 添加SaveVideo节点
+                    new_node_id = str(len(prompt) + 1)
+                    prompt[new_node_id] = {
+                        "inputs": {
+                            "video": [last_output_node_id, 0],
+                            "filename_prefix": "ComfyUI_video",
+                            "format": "mp4",
+                            "codec": "h264"
+                        },
+                        "class_type": "SaveVideo"
+                    }
+                    print(f"添加了SaveVideo输出节点: {new_node_id}")
+                else:
+                    # 添加SaveImage节点
+                    new_node_id = str(len(prompt) + 1)
+                    prompt[new_node_id] = {
+                        "inputs": {
+                            "images": [last_output_node_id, 0],
+                            "filename_prefix": "ComfyUI"
+                        },
+                        "class_type": "SaveImage"
+                    }
+                    print(f"添加了SaveImage输出节点: {new_node_id}")
+
+    def _process_node_parameters(self, node_id, node_type, node, widget_inputs, prompt, custom_prompt=None, negative_prompt=None):
+        """处理不同类型节点的参数"""
+        # 对于CLIPTextEncode节点，特殊处理：即使没有widgets_values，也要处理提示词
+        if node_type == 'CLIPTextEncode':
+            # 从inputs中获取原始提示词
+            original_prompt = node.get('inputs', {}).get('text', '')
+            
+            # 判断是否是正面提示节点
+            is_positive = False
+            node_title = node.get('_meta', {}).get('title', '')
+            if node_title and "Positive" in node_title:
+                is_positive = True
+            elif "Positive" in node_type or "positive" in node_type:
+                is_positive = True
+            elif "CLIP Text Encode" in node_title and "Negative" not in node_title:
+                is_positive = True
+            elif original_prompt and "white dragon warrior" in original_prompt and not "色调艳丽" in original_prompt:
+                is_positive = True
+            
+            # 判断是否是负面提示节点
+            is_negative = False
+            if node_title and "Negative" in node_title:
+                is_negative = True
+            elif "Negative" in node_type or "negative" in node_type:
+                is_negative = True
+            elif "CLIP Text Encode" in node_title and "Negative" in node_title:
+                is_negative = True
+            elif original_prompt and "色调艳丽" in original_prompt:
+                is_negative = True
+            
+            if is_positive:
+                # 使用自定义提示语或原始提示语
+                prompt[node_id]["inputs"]["text"] = custom_prompt if custom_prompt else original_prompt
+            elif is_negative:
+                # 处理负面提示语
+                prompt[node_id]["inputs"]["text"] = negative_prompt if negative_prompt else original_prompt
+            else:
+                # 其他文本节点保持原样
+                prompt[node_id]["inputs"]["text"] = original_prompt
+            
+            # 处理完CLIPTextEncode节点后返回
+            return
+            
+        # 检查节点是否有widgets_values（非CLIPTextEncode节点）
+        if 'widgets_values' not in node:
+            # 尝试从node.get('_meta', {}).get('widgets', {})获取widgets信息
+            meta_widgets = node.get('_meta', {}).get('widgets', {})
+            if not meta_widgets:
+                return
+            
+            # 如果没有widgets_values但有_meta.widgets，我们可以尝试从那里获取默认值
+            # 但对于我们的使用场景，可能不需要处理这种情况
+            return
+        
+        # 根据节点类型进行特殊处理
+        if node_type == 'CLIPTextEncode':
+            # 处理文本编码节点
+            if len(node['widgets_values']) > 0:
+                original_prompt = node['widgets_values'][0]
+                # 判断是否是正面提示节点
+                is_positive = False
+                node_title = node.get('_meta', {}).get('title', '')
+                if node_title and "Positive" in node_title:
+                    is_positive = True
+                elif "Positive" in node_type or "positive" in node_type:
+                    is_positive = True
+                elif "CLIP Text Encode" in node_title and "Negative" not in node_title:
+                    is_positive = True
+                elif "white dragon warrior" in original_prompt and not "色调艳丽" in original_prompt:
+                    is_positive = True
+                
+                # 判断是否是负面提示节点
+                is_negative = False
+                if node_title and "Negative" in node_title:
+                    is_negative = True
+                elif "Negative" in node_type or "negative" in node_type:
+                    is_negative = True
+                elif "CLIP Text Encode" in node_title and "Negative" in node_title:
+                    is_negative = True
+                elif "色调艳丽" in original_prompt:
+                    is_negative = True
+                
+                if is_positive:
+                    # 使用自定义提示语或原始提示语
+                    prompt[node_id]["inputs"]["text"] = custom_prompt if custom_prompt else original_prompt
+                elif is_negative:
+                    # 处理负面提示语
+                    prompt[node_id]["inputs"]["text"] = negative_prompt if negative_prompt else original_prompt
+                else:
+                    # 其他文本节点保持原样
+                    prompt[node_id]["inputs"]["text"] = original_prompt
+        elif node_type == "EmptyHunyuanLatentVideo":
+            # 处理混元空视频潜在空间节点
+            if len(node['widgets_values']) >= 3:
+                try:
+                    prompt[node_id]["inputs"]["width"] = node['widgets_values'][0]  # 宽度
+                    prompt[node_id]["inputs"]["height"] = node['widgets_values'][1]  # 高度
+                    prompt[node_id]["inputs"]["length"] = node['widgets_values'][2]  # 视频长度（帧数）
+                    if len(node['widgets_values']) >= 4:
+                        prompt[node_id]["inputs"]["batch_size"] = node['widgets_values'][3]  # 批量大小
+                except (IndexError, ValueError, TypeError):
+                    print("EmptyHunyuanLatentVideo节点参数设置失败，使用默认值")
+        elif node_type == "CreateVideo":
+            # 处理创建视频节点
+            if len(node['widgets_values']) >= 1:
+                try:
+                    prompt[node_id]["inputs"]["fps"] = node['widgets_values'][0]  # 帧率
+                except (IndexError, ValueError, TypeError):
+                    print("CreateVideo节点参数设置失败，使用默认值")
+        elif node_type == "KSamplerAdvanced":
+            # 处理高级K采样器节点
+            if len(node['widgets_values']) >= 8:
+                try:
+                    # 只需要设置seed参数，其他保持原有配置
+                    prompt[node_id]["inputs"]["noise_seed"] = node['widgets_values'][1]  # 随机种子
+                except (IndexError, ValueError, TypeError):
+                    print("KSamplerAdvanced节点参数设置失败，使用默认值")
+        else:
+            # 处理其他类型的节点
+            try:
+                for i, value in enumerate(node['widgets_values']):
+                    if i < len(widget_inputs):
+                        input_name = widget_inputs[i]
+                        prompt[node_id]["inputs"][input_name] = value
+            except (KeyError, TypeError, IndexError) as e:
+                # 如果在处理过程中出现错误，跳过该节点
+                print(f"处理节点 {node_id} ({node_type}) 时出错: {str(e)}")
+        
+        # 为保存类节点添加必要的参数
+        self._add_required_parameters(node_id, node_type, prompt)
+    
+    def _add_required_parameters(self, node_id, node_type, prompt):
+        """为节点添加必要的参数"""
+        # 为保存类节点添加必要的参数
+        if node_type == 'SaveVideo':
+            # 确保SaveVideo节点有必要的参数
+            if 'filename_prefix' not in prompt[node_id]["inputs"]:
+                prompt[node_id]["inputs"]["filename_prefix"] = "ComfyUI_video"
+            if 'format' not in prompt[node_id]["inputs"]:
+                prompt[node_id]["inputs"]["format"] = "mp4"
+            if 'codec' not in prompt[node_id]["inputs"]:
+                prompt[node_id]["inputs"]["codec"] = "h264"
+        elif node_type == 'SaveImage':
+            # 确保SaveImage节点有必要的参数
+            if 'filename_prefix' not in prompt[node_id]["inputs"]:
+                prompt[node_id]["inputs"]["filename_prefix"] = "ComfyUI"
+    
+    def _process_node_links(self, workflow_data, prompt, valid_nodes):
+        """处理节点之间的链接"""
+        # 创建节点ID到节点对象的映射
+        node_id_map = {str(node.get('id', '')): node for node in valid_nodes}
+        
+        # 处理链接
+        links = workflow_data.get('links', [])
+        for link in links:
+            # 链接格式：[源节点ID, 源节点输出索引, 目标节点ID, 目标节点输入索引, 链接类型]
+            if len(link) < 4:
+                continue
+            
+            source_node_id = str(link[0])
+            source_output_idx = link[1]
+            target_node_id = str(link[2])
+            target_input_idx = link[3]
+            
+            # 确保源节点和目标节点都在prompt中
+            if source_node_id not in prompt or target_node_id not in prompt:
+                continue
+            
+            # 获取目标节点的输入名称
+            target_node = node_id_map.get(target_node_id)
+            if not target_node:
+                continue
+            
+            # 获取目标节点的输入列表
+            target_inputs = target_node.get('inputs', [])
+            if target_input_idx < 0 or target_input_idx >= len(target_inputs):
+                continue
+            
+            target_input_name = target_inputs[target_input_idx].get('name', '')
+            if target_input_name:
+                # 设置链接：[源节点ID, 源节点输出索引]
+                prompt[target_node_id]["inputs"][target_input_name] = [source_node_id, source_output_idx]
+    
+    def upload_image(self, image_path):
+        """上传图片到ComfyUI服务器"""
+        try:
+            # 检查图片是否存在
+            if not os.path.exists(image_path):
+                raise FileNotFoundError(f"图片文件不存在: {image_path}")
+            
+            # 准备上传请求 - 使用multipart/form-data格式
+            url = f"{self.server_url}/upload/image"
+            
+            # 获取文件名
+            image_filename = os.path.basename(image_path)
+            
+            # 使用files参数上传图片（requests会自动设置multipart/form-data格式）
+            with open(image_path, 'rb') as f:
+                files = {'image': (image_filename, f, 'image/png')}
+                response = requests.post(url, files=files)
+                
+            response.raise_for_status()  # 如果响应状态码不是200，抛出异常
+            
+            # 解析响应
+            response_json = response.json()
+            image_filename = response_json.get('name')
+            
+            if not image_filename:
+                # 修复自我赋值bug，使用原始文件名
+                image_filename = os.path.basename(image_path)
+                print(f"警告：服务器未返回图片名称，使用原始文件名: {image_filename}")
+            
+            print(f"图片上传成功: {image_filename}")
+            return image_filename
+        except requests.exceptions.HTTPError as e:
+            # 处理HTTP错误
+            error_info = self._handle_http_exception(e)
+            print(f"上传图片HTTP错误: {error_info['status_code']} - {error_info['reason']}")
+            print(f"错误详情: {error_info['error_text']}")
+            raise
+        except Exception as e:
+            print(f"上传图片失败: {str(e)}")
+            raise
+    
+    def queue_prompt(self, prompt):
+        """提交提示词到ComfyUI服务器"""
+        try:
+            # 准备请求数据
+            payload = {
+                "prompt": prompt,
+                "client_id": self.client_id
+            }
+            
+            # 发送POST请求
+            url = f"{self.server_url}/prompt"
+            headers = {'Content-Type': 'application/json'}
+            response = requests.post(url, json=payload, headers=headers)
+            response.raise_for_status()  # 如果响应状态码不是200，抛出异常
+            
+            # 解析响应
+            response_json = response.json()
+            return response_json
+        except requests.exceptions.HTTPError as e:
+            # 处理HTTP错误
+            error_info = self._handle_http_exception(e)
+            print(f"提交提示词HTTP错误: {error_info['status_code']} - {error_info['reason']}")
+            print(f"错误详情: {error_info['error_text']}")
+            raise
+        except Exception as e:
+            print(f"提交提示词失败: {str(e)}")
+            raise
+    
+    def get_history(self, prompt_id):
+        """获取提示词执行历史"""
+        try:
+            # 发送GET请求
+            url = f"{self.server_url}/history/{prompt_id}"
+            response = requests.get(url)
+            response.raise_for_status()  # 如果响应状态码不是200，抛出异常
+            
+            # 解析响应
+            response_json = response.json()
+            return response_json
+        except requests.exceptions.HTTPError as e:
+            # 处理HTTP错误
+            error_info = self._handle_http_exception(e)
+            print(f"获取历史记录HTTP错误: {error_info['status_code']} - {error_info['reason']}")
+            print(f"错误详情: {error_info['error_text']}")
+            raise
+        except Exception as e:
+            print(f"获取历史记录失败: {str(e)}")
+            raise
+    
+    def track_progress(self, prompt_id):
+        """通过WebSocket跟踪任务执行进度并返回执行状态"""
+        global should_continue
+        result = {
+            'success': False,
+            'message': '',
+            'prompt_id': prompt_id
+        }
+        
+        try:
+            # 创建WebSocket连接
+            ws_url = f"ws://{self.server_url.split('//')[-1]}/ws?clientId={self.client_id}"
+            ws = websocket.WebSocket()
+            ws.connect(ws_url)
+            
+            # 等待任务完成或被中断
+            while should_continue:
+                try:
+                    # 接收WebSocket消息
+                    message = ws.recv()
+                    if not message:
+                        print("\nsocket 消息不存在")
+                        continue
+                    # 解析消息
+                    message_data = json.loads(message)
+                    print("\n消息类型", message_data.get('type'))
+                    
+                    # 处理进度消息
+                    if message_data.get('type') == 'progress':
+                        progress_data = message_data.get('data', {})
+                        if 'value' in progress_data and 'max' in progress_data:
+                            progress_percent = (progress_data['value'] / progress_data['max']) * 100
+                            node_id = progress_data.get('node_id', '未知')
+                            print(f"正在执行节点: {node_id} ({progress_percent:.1f}%)", end="\r")
+                    
+                    # 处理执行状态消息 - 新增：处理execution_success消息
+                    elif message_data.get('type') == 'execution_success':
+                        print("\n视频生成成功完成！")
+                        result['success'] = True
+                        result['message'] = '视频生成成功'
+                        return result
+                    
+                    # 处理执行状态消息 - 原有的idle状态检测
+                    elif message_data.get('type') == 'execution_state':
+                        if message_data.get('data') == 'idle':
+                            print("\n视频生成完成")
+                            # 这里我们不能直接判断成功，需要后续通过历史记录检查
+                            result['success'] = True
+                            result['message'] = '视频生成完成'
+                            return result
+                    
+                    # 处理错误消息
+                    elif message_data.get('type') == 'execution_error':
+                        error_msg = message_data.get('data', {}).get('error', '未知错误')
+                        print(f"\n执行错误: {error_msg}")
+                        result['success'] = False
+                        result['error'] = error_msg
+                        result['message'] = '视频生成过程中发生错误'
+                        return result
+                except websocket.WebSocketTimeoutException:
+                    # WebSocket超时，继续等待
+                    continue
+                except websocket.WebSocketConnectionClosedException:
+                    print("\nWebSocket连接已关闭")
+                    result['success'] = False
+                    result['error'] = 'WebSocket连接已关闭'
+                    result['message'] = '与服务器的连接意外关闭'
+                    return result
+                except json.JSONDecodeError:
+                    # 消息不是有效的JSON，忽略
+                    print("\n 消息不是有效的JSON")
+                    continue
+            
+            # 如果循环正常结束但没有明确的成功/失败标志，可能是被中断
+            if not should_continue:
+                result['success'] = False
+                result['error'] = '操作被用户中断'
+                result['message'] = '视频生成被用户中断'
+                return result
+                
+            return result
+            
+        except Exception as e:
+            print(f"跟踪进度出错: {str(e)}")
+            result['success'] = False
+            result['error'] = str(e)
+            result['message'] = '跟踪进度过程中发生异常'
+            return result
+        finally:
+            # 关闭WebSocket连接
+            try:
+                if 'ws' in locals() and ws.connected:
+                    ws.close()
+            except:
+                pass
+    
+    def download_video(self, video_url, save_directory=None, filename=None):
+        """下载视频文件并保存到本地"""
+        try:
+            # 确定保存目录
+            if save_directory is None:
+                # 默认保存到当前工作目录的output_videos子目录
+                save_directory = os.path.join(os.getcwd(), 'output_videos')
+                
+            # 确保保存目录存在
+            os.makedirs(save_directory, exist_ok=True)
+            
+            # 确定文件名
+            if filename is None:
+                # 从URL或当前时间生成文件名
+                if 'filename=' in video_url:
+                    # 尝试从URL中提取文件名
+                    url_filename = urllib.parse.unquote(video_url.split('filename=')[1].split('&')[0])
+                    filename = url_filename
+                else:
+                    # 使用时间戳生成唯一文件名
+                    timestamp = time.strftime('%Y%m%d_%H%M%S')
+                    filename = f"comfyui_video_{timestamp}.mp4"
+            
+            # 构建完整的保存路径
+            save_path = os.path.join(save_directory, filename)
+            
+            print(f"正在下载视频到本地: {save_path}")
+            
+            # 发送GET请求下载视频
+            response = requests.get(video_url, stream=True)
+            response.raise_for_status()
+            
+            # 写入文件
+            with open(save_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            
+            print(f"视频已成功保存到: {save_path}")
+            return save_path
+        except Exception as e:
+            print(f"下载视频失败: {str(e)}")
+            raise
+    
+    def upload_video_to_api(self, video_path):
+        """上传视频到指定接口"""
+        try:
+            print(f"准备上传视频: {video_path}")
+            
+            # 获取文件大小
+            file_size = os.path.getsize(video_path)
+            print(f"文件大小: {file_size / 1024 / 1024:.2f} MB")
+            
+            # 读取视频文件数据
+            with open(video_path, 'rb') as f:
+                file_data = f.read()
+            
+            # 此时文件已经关闭，不再持有文件句柄
+            files = {'file': ('temp_image.mp4', file_data)}
+            data = {
+                'description': "自动生成的图片",
+                'category': '',  # 可根据实际情况修改
+                'tags': ''  # 可根据实际情况修改
+            }
+            
+            # 上传到指定接口，增加超时时间为5分钟
+            print(f"正在上传视频到接口...")
+            upload_url = 'http://120.27.130.190:8091/api/files/upload'
+            
+            # 使用更长的超时时间，大文件需要更长时间上传
+            # 连接超时30秒，读取超时300秒（5分钟）
+            response = requests.post(upload_url, files=files, data=data, timeout=(30, 300))
+            
+            # 检查响应
+            response.raise_for_status()
+            
+            # 解析响应结果
+            try:
+                result = response.json()
+                print(f"上传响应 (JSON): {result}")
+                return {
+                    'success': True,
+                    'message': '视频上传成功',
+                    'response': result
+                }
+            except json.JSONDecodeError:
+                # 如果响应不是JSON格式，返回文本
+                print(f"上传响应 (Text): {response.text}")
+                return {
+                    'success': True,
+                    'message': '视频上传成功',
+                    'response_text': response.text
+                }
+        
+        except requests.exceptions.Timeout as e:
+            error_info = f"上传超时: {str(e)}"
+            print(f"视频上传失败: {error_info}")
+            return {
+                'success': False,
+                'error': error_info
+            }
+        except requests.exceptions.HTTPError as e:
+            error_info = f"HTTP错误: {e.response.status_code} - {e.response.text}"
+            print(f"视频上传失败: {error_info}")
+            return {
+                'success': False,
+                'error': error_info
+            }
+        except requests.exceptions.ConnectionError as e:
+            error_info = f"连接错误: {str(e)}"
+            print(f"视频上传失败: {error_info}")
+            return {
+                'success': False,
+                'error': error_info
+            }
+        except Exception as e:
+            error_info = f"上传过程出错: {str(e)}"
+            print(f"视频上传失败: {error_info}")
+            return {
+                'success': False,
+                'error': error_info
+            }
+
+    def generate_video(self, workflow_path, custom_prompt=None, negative_prompt=None, save_to_local=True, save_directory=None):
+        """生成视频的主函数"""
+        global should_continue
+        
+        try:
+            # 1. 加载工作流
+            print(f"正在加载工作流文件: {workflow_path}")
+            workflow_data = self.load_workflow(workflow_path)
+            
+            # 2. 准备提示词（不需要图片上传）
+            print("正在准备提示词配置...")
+            prompt = self.prepare_prompt(
+                workflow_data, 
+                custom_prompt=custom_prompt, 
+                negative_prompt=negative_prompt
+            )
+            
+            # 检查是否被中断
+            if not should_continue:
+                return {
+                    'success': False,
+                    'error': '程序被用户中断',
+                    'message': '视频生成被用户中断'
+                }
+            
+            # 3. 提交提示词到服务器
+            print("正在提交视频生成任务...")
+            queue_response = self.queue_prompt(prompt)
+            prompt_id = queue_response.get('prompt_id')
+            
+            if not prompt_id:
+                raise Exception(f"提交任务失败，响应: {queue_response}")
+            
+            print(f"任务ID: {prompt_id}")
+            
+            # 4. 跟踪生成进度，并获取执行结果状态
+            progress_result = self.track_progress(prompt_id)
+            
+            # 修复：添加空值检查
+            if progress_result is None:
+                print("警告：track_progress返回了None")
+                return {
+                    'success': False,
+                    'error': '跟踪进度失败',
+                    'message': '无法获取视频生成进度信息'
+                }
+            
+            # 检查跟踪结果，如果失败直接返回
+            if not progress_result.get('success', False):
+                return {
+                    'success': False,
+                    'error': progress_result.get('error', '跟踪进度失败'),
+                    'message': progress_result.get('message', '视频生成过程中出现问题')
+                }
+            
+            # 检查是否被中断
+            if not should_continue:
+                return {
+                    'success': False,
+                    'error': '程序被用户中断',
+                    'message': '视频生成被用户中断'
+                }
+            
+            # 5. 获取生成历史
+            print("正在获取视频生成结果...")
+            history = self.get_history(prompt_id)
+            
+            # 检查历史记录是否包含prompt_id
+            if prompt_id not in history:
+                print(f"警告: 历史记录中未找到任务ID {prompt_id}")
+                print(f"历史记录内容: {history}")
+                return {
+                    'success': False,
+                    'error': '任务未在历史记录中找到',
+                    'message': '视频生成可能未完成',
+                    'frames_count': 0,
+                    'prompt_id': prompt_id
+                }
+            
+            prompt_history = history.get(prompt_id, {})
+            
+            # 6. 解析结果
+            frames_count = 0
+            video_info = None
+            has_output = False
+            
+            # 计算生成的帧数并查找视频信息
+            outputs = prompt_history.get('outputs', {})
+            if not outputs:
+                print("警告: 任务历史记录中没有输出")
+            else:
+                print(f"找到 {len(outputs)} 个输出节点")
+                
+                # 更全面地检查输出内容
+                print("详细输出结构:")
+                for node_id, node_output in outputs.items():
+                    print(f"\n检查节点 {node_id}:")
+                    print(f"  类型: {node_output.get('class_type', '未知')}")
+                    print(f"  可用键: {list(node_output.keys())}")
+                    
+                    # 标记有输出
+                    has_output = True
+                    
+                    # 计算帧数
+                    if 'images' in node_output:
+                        node_frames = len(node_output['images'])
+                        frames_count += node_frames
+                        print(f"  该节点生成了 {node_frames} 帧")
+                    
+                    # 扩展视频输出信息查找逻辑
+                    # 1. 直接在node_output中查找videos
+                    if 'videos' in node_output and node_output['videos']:
+                        print(f"  找到视频输出在节点直接输出中")
+                        video_info = node_output['videos'][0]
+                        break
+                    # 2. 在ui中查找videos
+                    elif 'ui' in node_output:
+                        ui_output = node_output['ui']
+                        print(f"  UI输出键: {list(ui_output.keys())}")
+                        if 'videos' in ui_output and ui_output['videos']:
+                            print(f"  找到视频输出在UI中")
+                            video_info = ui_output['videos'][0]
+                            break
+                        # 查找可能的其他视频相关字段
+                        for ui_key in ui_output:
+                            if isinstance(ui_output[ui_key], list) and ui_key.lower().find('video') != -1:
+                                print(f"  找到可能的视频输出在UI字段 '{ui_key}' 中")
+                                video_info = ui_output[ui_key][0]
+                                break
+                    # 3. 检查是否有其他可能包含视频的字段
+                    if not video_info:
+                        for key, value in node_output.items():
+                            if isinstance(value, list) and key.lower().find('video') != -1:
+                                print(f"  找到可能的视频输出在字段 '{key}' 中")
+                                video_info = value[0]
+                                break
+                    
+                    # 如果找到视频，就跳出循环
+                    if video_info:
+                        break
+                
+                # 如果仍然没有找到视频信息，尝试从图像帧推断
+                if not video_info and frames_count > 0:
+                    print(f"\n注意: 没有在标准位置找到视频信息，但生成了 {frames_count} 帧图像")
+                    print("可能视频以其他方式存储或需要从图像帧合成")
+            
+            # 根据实际结果判断是否成功
+            if not has_output:
+                return {
+                    'success': False,
+                    'error': '没有生成任何输出',
+                    'message': '视频生成失败: 没有生成任何内容',
+                    'frames_count': frames_count,
+                    'prompt_id': prompt_id
+                }
+            
+            # 构建结果对象
+            # 修改成功判断标准：如果ComfyUI执行成功且有输出，就认为成功
+            result = {
+                'success': has_output and frames_count > 0,  # 有输出且有帧数就认为成功
+                'prompt_id': prompt_id,
+                'frames_count': frames_count,
+                'has_output': has_output
+            }
+            
+            # 根据结果设置消息
+            if video_info:
+                result['message'] = '视频生成成功'
+                result['video_info'] = video_info
+                
+                # 构建视频下载URL
+                if 'filename' in video_info and 'subfolder' in video_info and 'type' in video_info:
+                    # 使用urllib.parse.quote来编码URL参数
+                    filename = urllib.parse.quote(video_info['filename'])
+                    subfolder = urllib.parse.quote(video_info['subfolder'])
+                    type_ = urllib.parse.quote(video_info['type'])
+                    
+                    video_url = f"{self.server_url}/view?filename={filename}&subfolder={subfolder}&type={type_}"
+                    result['video_url'] = video_url
+                    print(f"视频生成成功，下载地址: {video_url}")
+                    
+                    # 如果需要保存到本地
+                    if save_to_local:
+                        try:
+                            local_video_path = self.download_video(video_url, save_directory=save_directory, filename=video_info['filename'])
+                            result['local_video_path'] = local_video_path
+                        except Exception as e:
+                            print(f"保存视频到本地失败，但视频生成成功: {str(e)}")
+                            result['local_video_save_error'] = str(e)
+            elif frames_count > 0:
+                # 修改这里：如果有帧数输出，就认为视频生成成功
+                result['success'] = True
+                result['message'] = f'视频生成成功: 生成了 {frames_count} 帧'
+                
+                # 尝试构建一个基本的视频信息
+                result['video_info'] = {
+                    'message': '视频已成功生成，请在ComfyUI界面查看',
+                    'frames_generated': frames_count
+                }
+                
+                print(f"视频生成成功: 生成了 {frames_count} 帧")
+                print("注意: 虽然没有找到标准格式的视频信息，但ComfyUI已成功执行并生成了图像帧")
+            else:
+                result['success'] = False
+                result['error'] = '没有生成视频或图像帧'
+                result['message'] = '视频生成失败: 没有生成视频或图像帧'
+            
+            # 添加视频上传功能
+            if result.get('success', False):
+                print(f"视频开始上传。。。")
+                
+                # 直接从ComfyUI的output/video文件夹中查找最新的视频文件
+                video_path = None
+                try:
+                    # 使用用户提供的正确ComfyUI视频输出目录路径
+                    comfyui_video_dir = "C:\\LLM\\ComfyUI_windows_portable\\ComfyUI\\output\\video"
+                    
+                    # 检查目录是否存在
+                    if os.path.exists(comfyui_video_dir) and os.path.isdir(comfyui_video_dir):
+                        # 获取目录中的所有视频文件
+                        video_files = [f for f in os.listdir(comfyui_video_dir) if f.endswith(('.mp4', '.avi', '.mov', '.mkv'))]
+                        
+                        if video_files:
+                            # 按修改时间排序，获取最新的视频文件
+                            video_files.sort(key=lambda x: os.path.getmtime(os.path.join(comfyui_video_dir, x)), reverse=True)
+                            video_path = os.path.join(comfyui_video_dir, video_files[0])
+                            result['local_video_path'] = video_path
+                            print(f"从output/video文件夹找到最新视频文件: {video_path}")
+                        else:
+                            print("警告: ComfyUI的output/video文件夹中没有找到视频文件")
+                    else:
+                        print(f"警告: ComfyUI的output/video文件夹不存在: {comfyui_video_dir}")
+                except Exception as e:
+                    print(f"查找视频文件时出错: {str(e)}")
+                
+                # 如果找到了视频文件，上传到指定接口
+                if video_path and os.path.exists(video_path):
+                    try:
+                        upload_result = self.upload_video_to_api(video_path)
+                        result['upload_result'] = upload_result
+                        if upload_result.get('success'):
+                            print(f"视频上传成功: {upload_result.get('message')}")
+                        else:
+                            print(f"视频上传失败: {upload_result.get('error')}")
+                    except Exception as e:
+                        print(f"视频上传过程中出错: {str(e)}")
+                        result['upload_error'] = str(e)
+            
+            return result
+        except Exception as e:
+            print(f"视频生成过程中出错: {str(e)}")
+            import traceback
+            traceback.print_exc()  # 打印详细的错误栈
+            return {
+                'success': False,
+                'error': str(e),
+                'message': '视频生成失败'
+            }
+
+# 视频生成示例函数
+def generate_video_example():
+    """视频生成示例"""
+    # 创建视频生成器实例
+    video_generator = ComfyUIVideoGenerator()
+    
+    # 工作流文件路径
+    workflow_path = os.path.join(os.path.dirname(__file__), 'workflows', 'video_wan2_2_14B_t2v.json')
+    
+    try:
+        # 自定义提示词
+        prompt = "A beautiful landscape with mountains and lake, clouds moving slowly across the sky"
+        
+        # 负面提示词
+        negative_prompt = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止"
+        
+        # 生成视频
+        result = video_generator.generate_video(
+            workflow_path=workflow_path,
+            custom_prompt=prompt,
+            negative_prompt=negative_prompt
+        )
+        
+        # 打印结果
+        print("\n===== 视频生成结果 =====")
+        if result['success']:
+            print("✅ 视频生成成功!")
+            print(f"生成的帧数: {result['frames_count']}")
+            if 'video_url' in result:
+                print(f"视频下载链接: {result['video_url']}")
+        else:
+            print(f"❌ 视频生成失败")
+            print(f"错误信息: {result.get('error', '未知错误')}")
+            print(f"详细信息: {result.get('message', '')}")
+            print(f"生成的帧数: {result.get('frames_count', 0)}")
+            print(f"是否有输出: {result.get('has_output', False)}")
+        print("======================")
+    except Exception as e:
+        print(f"示例执行出错: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+
+def generate_video_from_prompt_and_url(prompt, negative_prompt=None):
+    """
+    对外提供的简化接口，只需要传入提示词即可生成视频并返回结果
+    
+    参数:
+        prompt (str): 视频生成的提示词
+        negative_prompt (str, optional): 负面提示词，默认为通用设置
+    
+    返回:
+        dict: 包含视频生成结果的字典，包括success状态、帧数、视频信息以及上传结果等
+    """
+    # 默认负面提示词
+    if negative_prompt is None:
+        negative_prompt = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止"
+    
+    # 创建视频生成器实例
+    video_generator = ComfyUIVideoGenerator()
+    
+    # 工作流文件路径
+    workflow_path = os.path.join(os.path.dirname(__file__), 'workflows', 'video_wan2_2_14B_t2v.json')
+    
+    try:
+        # 生成视频
+        result = video_generator.generate_video(
+            workflow_path=workflow_path,
+            custom_prompt=prompt,
+            negative_prompt=negative_prompt
+        )
+        
+        # 检查并记录上传结果
+        if 'upload_result' in result:
+            upload_result = result['upload_result']
+            print(f"视频上传结果: {upload_result}")
+            # 确保上传结果中的success、message和response字段存在
+            if upload_result.get('success'):
+                print(f"✅ 视频上传成功: {upload_result.get('message')}")
+                if 'response' in upload_result:
+                    print(f"   上传响应详情: {upload_result['response']}")
+            else:
+                print(f"❌ 视频上传失败: {upload_result.get('error', '未知错误')}")
+        else:
+            print("⚠️  未找到视频上传结果")
+        
+        # 返回完整结果，包括上传信息
+        return result
+    except Exception as e:
+        # 捕获异常并返回错误信息
+        error_info = {
+            'success': False,
+            'error': str(e),
+            'message': '视频生成过程中出现异常',
+            'frames_count': 0,
+            'has_output': False
+        }
+        import traceback
+        traceback.print_exc()  # 打印详细错误栈以便调试
+        return error_info
+
+# 注意：generate_video_from_url_and_prompt函数已被更完善的generate_video_from_prompt_and_url函数替代
+# 请使用generate_video_from_prompt_and_url函数获取更好的错误处理和更详细的返回信息
+
+if __name__ == "__main__":
+    # 运行示例
+    generate_video_example()
