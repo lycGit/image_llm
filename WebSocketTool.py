@@ -4,6 +4,7 @@ import json
 
 from comfyui.image2image import generate_image_from_url_and_prompt
 from comfyui.image2video_official_api import generate_video_from_prompt_and_url
+from comfyui.text2video_official_api import generate_video_from_prompt_and_url as generate_text2video_from_prompt
 
 
 class WebSocketClient:
@@ -57,16 +58,9 @@ class WebSocketClient:
                         self.send_message(json_str)
                 else:
                     print(f"图片生成失败: {result['error']}")
-            if json_data.get('action') == 'image2video':
-                # 提示词
-                prompt = discribe_msg
-
-                # 图片URL
-                image_url = json_data["imageUrl"]
-
-                # 调用视频生成函数
-                result = generate_video_from_prompt_and_url(prompt, image_url)
-
+    
+            # 公共方法：处理视频生成结果
+            def handle_video_result(result, user_id):
                 if result['success']:
                     print("视频生成成功!")
                     # 直接使用upload_result
@@ -86,8 +80,8 @@ class WebSocketClient:
                             print(f"从响应中提取的视频URL: {video_url}")
                         
                         data = {
-                            'targetUserId': json_data.get('userId'),
-                            "userId": json_data.get('userId'),
+                            'targetUserId': user_id,
+                            "userId": user_id,
                             "msg": "视频已创建完成",
                             "videoUrl": video_url,
                         }
@@ -97,8 +91,8 @@ class WebSocketClient:
                         print("视频上传失败或未找到上传结果")
                         # 即使上传失败也发送成功消息
                         data = {
-                            'targetUserId': json_data.get('userId'),
-                            "userId": json_data.get('userId'),
+                            'targetUserId': user_id,
+                            "userId": user_id,
                             "msg": "视频已创建完成，但上传失败",
                             "videoUrl": "",
                         }
@@ -108,13 +102,36 @@ class WebSocketClient:
                     print(f"视频生成失败: {result.get('error', '未知错误')}")
                     # 发送失败消息
                     data = {
-                        'targetUserId': json_data.get('userId'),
-                        "userId": json_data.get('userId'),
+                        'targetUserId': user_id,
+                        "userId": user_id,
                         "msg": "视频生成失败",
                         "error": result.get('error', '未知错误'),
                     }
                     json_str = json.dumps(data, ensure_ascii=False, indent=4)
                     self.send_message(json_str)
+            
+            if json_data.get('action') == 'image2video':
+                # 提示词
+                prompt = discribe_msg
+
+                # 图片URL
+                image_url = json_data["imageUrl"]
+
+                # 调用视频生成函数
+                result = generate_video_from_prompt_and_url(prompt, image_url)
+
+                # 处理视频生成结果
+                handle_video_result(result, json_data.get('userId'))
+            
+            elif json_data.get('action') == 'text2video':
+                # 提示词
+                prompt = discribe_msg
+
+                # 调用视频生成函数 (不需要image_url参数)
+                result = generate_text2video_from_prompt(prompt)
+
+                # 处理视频生成结果
+                handle_video_result(result, json_data.get('userId'))
             elif json_data.get('action') == 'IPAdapterFaceIDPortrait':
                 process = subprocess.Popen(['python3', 'IPAdapterFaceIDPortrait.py', '--discribe' ,discribe_msg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 stdout, stderr = process.communicate()
