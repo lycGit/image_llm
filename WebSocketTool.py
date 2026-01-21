@@ -2,7 +2,7 @@ import websocket
 import threading
 import json
 
-from comfyui.image2image import generate_image_from_url_and_prompt
+from comfyui.image_edit import generate_image_from_url_and_prompt
 from comfyui.text2image_flux import generate_image_from_prompt
 from comfyui.image2video_official_api import generate_video_from_prompt_and_url
 from comfyui.text2video_official_api import generate_video_from_prompt_and_url as generate_text2video_from_prompt
@@ -41,8 +41,33 @@ class WebSocketClient:
                 # 图片URL
                 image_url = json_data["imageUrl"]
 
-                # 调用图片生成函数
-                result = generate_image_from_url_and_prompt(prompt, image_url)
+                # 调用图片生成函数，添加负面提示词
+                result = generate_image_from_url_and_prompt(prompt, image_url, negative_prompt="text, watermark, low quality, blurry, distorted, ugly, noise")
+
+                if result['success']:
+                    print("图片生成成功!")
+                    # 访问结果
+                    for i, item in enumerate(result['results']):
+                        print(f"结果 {i + 1}: {item['upload_result']}")
+                        data = {
+                            'targetUserId': json_data.get('userId'),
+                            "userId": json_data.get('userId'),
+                            "msg": "图片已创建完成",
+                            "imageUrl": item['upload_result'].get('imageUrl1'),
+                        }
+                        json_str = json.dumps(data, ensure_ascii=False, indent=4)
+                        self.send_message(json_str)
+                else:
+                    print(f"图片生成失败: {result['error']}")
+            elif json_data.get('action') == 'image_edit':
+                # 提示词
+                prompt = discribe_msg
+
+                # 图片URL
+                image_url = json_data["imageUrl"]
+
+                # 调用图片生成函数，添加负面提示词
+                result = generate_image_from_url_and_prompt(prompt, image_url, negative_prompt="text, watermark, low quality, blurry, distorted, ugly, noise")
 
                 if result['success']:
                     print("图片生成成功!")
