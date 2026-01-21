@@ -122,118 +122,38 @@ def load_workflow_from_json(file_path, custom_prompt=None, image_filename=None):
     with open(file_path, 'r', encoding='utf-8') as f:
         workflow_data = json.load(f)
     
-    # 创建提示对象
-    prompt = {}
+    # 创建提示对象（直接复制JSON内容）
+    prompt = workflow_data.copy()
     
-    # 过滤掉MarkdownNote节点，因为它们只是注释，不是实际功能节点
-    valid_nodes = [node for node in workflow_data['nodes'] if node['type'] != 'MarkdownNote']
-    
-    # 为每个有效节点创建基本结构
-    for node in valid_nodes:
-        node_id = str(node['id'])
-        prompt[node_id] = {
-            "inputs": {},
-            "class_type": node['type']
-        }
-    
-    # 处理每个有效节点的widgets_values和输入参数
-    for node in valid_nodes:
-        node_id = str(node['id'])
-        node_type = node['type']
-        
-        # 获取所有带widget的输入参数名称
-        widget_inputs = [input['name'] for input in node['inputs'] if 'widget' in input]
-        
-        # 如果有widgets_values，将其映射到对应的输入参数
-        if 'widgets_values' in node:
-            # 特殊处理KSampler节点
-            if node_type == 'KSampler':
-                # 根据image2image.json中的widgets_values结构和已知的KSampler参数顺序进行映射
-                if len(node['widgets_values']) >= 6:
-                    # 处理seed
-                    try:
-                        prompt[node_id]["inputs"]["seed"] = int(node['widgets_values'][0])
-                    except (ValueError, TypeError):
-                        prompt[node_id]["inputs"]["seed"] = random.randint(0, 2**32 - 1)
-                    
-                    # 处理steps
-                    steps_value = node['widgets_values'][1]
-                    if isinstance(steps_value, str) and steps_value == 'randomize':
-                        prompt[node_id]["inputs"]["steps"] = 20  # 使用默认值
-                    else:
-                        try:
-                            prompt[node_id]["inputs"]["steps"] = int(steps_value)
-                        except (ValueError, TypeError):
-                            prompt[node_id]["inputs"]["steps"] = 20  # 使用默认值
-                    
-                    # 处理cfg
-                    try:
-                        prompt[node_id]["inputs"]["cfg"] = float(node['widgets_values'][2])
-                    except (ValueError, TypeError):
-                        prompt[node_id]["inputs"]["cfg"] = 8.0  # 使用默认值
-                    
-                    # 处理sampler_name
-                    prompt[node_id]["inputs"]["sampler_name"] = "dpmpp_2m"  # 从image2image.json中获取的有效值
-                    
-                    # 处理scheduler
-                    prompt[node_id]["inputs"]["scheduler"] = "normal"  # 从image2image.json中获取的有效值
-                    
-                    # 处理denoise - 对于image2image，denoise应该小于1
-                    try:
-                        prompt[node_id]["inputs"]["denoise"] = float(node['widgets_values'][5])
-                    except (ValueError, TypeError):
-                        prompt[node_id]["inputs"]["denoise"] = 0.87  # 使用默认值
-            elif node_type == 'CLIPTextEncode':
-                # 处理文本编码节点，检查是否需要替换提示语
-                if len(node['widgets_values']) > 0:
-                    original_prompt = node['widgets_values'][0]
-                    # 检查是否是正面提示节点（包含原始提示语的节点）
-                    if "photograph of victorian woman with wings" in original_prompt and custom_prompt:
-                        # 使用自定义提示语
-                        prompt[node_id]["inputs"]["text"] = custom_prompt
-                    else:
-                        # 使用原始提示语
-                        prompt[node_id]["inputs"]["text"] = original_prompt
-            elif node_type == 'LoadImage':
-                # 处理图片加载节点
-                if image_filename:
-                    # 使用上传的图片文件名
-                    prompt[node_id]["inputs"]["image"] = image_filename
+    # 处理提示语替换
+    if custom_prompt:
+        # 遍历所有节点
+        for node_id, node in prompt.items():
+            # 找到CLIPTextEncode节点
+            if node['class_type'] == 'CLIPTextEncode':
+                # 判断是正面还是负面提示词
+                # 检查原始提示词是否包含watermark等负面内容
+                original_text = node['inputs'].get('text', '')
+                if original_text.strip() == 'watermark, text':
+                    # 保持负面提示词不变，或可以根据需要提供自定义负面提示
+                    pass
                 else:
-                    # 使用默认图片
-                    if len(node['widgets_values']) > 0:
-                        prompt[node_id]["inputs"]["image"] = node['widgets_values'][0]
-            else:
-                # 普通节点的处理逻辑
-                for i, value in enumerate(node['widgets_values']):
-                    if i < len(widget_inputs):
-                        input_name = widget_inputs[i]
-                        prompt[node_id]["inputs"][input_name] = value
-        
-        # 为SaveImage节点确保有filename_prefix
-        if node_type == 'SaveImage' and 'filename_prefix' not in prompt[node_id]["inputs"]:
-            prompt[node_id]["inputs"]["filename_prefix"] = "ComfyUI"
+                    # 替换为自定义提示词
+                    node['inputs']['text'] = custom_prompt
     
-    # 处理节点之间的链接，只处理有效节点之间的链接
-    for link in workflow_data['links']:
-        link_id, source_node_id, source_output_idx, target_node_id, target_input_idx, link_type = link
-        
-        source_node_str = str(source_node_id)
-        target_node_str = str(target_node_id)
-        
-        # 确保源节点和目标节点都在有效节点列表中
-        if source_node_str not in prompt or target_node_str not in prompt:
-            continue
-        
-        # 找到目标节点中对应索引的输入参数名称
-        target_node = next((n for n in valid_nodes if str(n['id']) == target_node_str), None)
-        if target_node is None or target_input_idx >= len(target_node['inputs']):
-            continue
-        
-        target_input_name = target_node['inputs'][target_input_idx]['name']
-        
-        # 设置链接值，格式为[源节点ID, 输出索引]
-        prompt[target_node_str]["inputs"][target_input_name] = [source_node_str, source_output_idx]
+    # 处理参考图替换
+    if image_filename:
+        # 遍历所有节点
+        for node_id, node in prompt.items():
+            # 找到LoadImage节点
+            if node['class_type'] == 'LoadImage':
+                # 替换为上传的图片文件名
+                node['inputs']['image'] = image_filename
+    
+    # 确保SaveImage节点有filename_prefix
+    for node_id, node in prompt.items():
+        if node['class_type'] == 'SaveImage' and 'filename_prefix' not in node['inputs']:
+            node['inputs']['filename_prefix'] = "ComfyUI"
     
     return prompt
 
@@ -413,10 +333,10 @@ def main():
 # 使用示例
 def example_usage():
     # 提示词
-    prompt = "outdoor portrait photography, beautiful woman in natural setting, golden hour sunlight"
+    prompt = "湖泊上空乌云密布，电闪雷鸣.........................."
     
     # 图片URL
-    image_url = "http://120.27.130.190:8091/api/files/download/14d1ea3f-07ea-4302-afff-adc3e6d03c0e_tmpx4_5ndmd.png"
+    image_url = "http://120.27.130.190:8091/api/files/download/6b04217c-4372-4062-bb39-46da0c1786e2_temp_image.png"
     
     # 调用图片生成函数
     result = generate_image_from_url_and_prompt(prompt, image_url)
