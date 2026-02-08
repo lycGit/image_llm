@@ -13,6 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8900
+ENV PYTHONPATH=/app
 
-CMD ["python", "app/main.py"]
+EXPOSE 8092
+
+CMD ["python", "run.py"]

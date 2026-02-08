@@ -10,7 +10,7 @@ from app.comfyui.text2video_official_api import generate_video_from_prompt_and_u
 
 class WebSocketClient:
     # def __init__(self, url="ws://127.0.0.1:8092/webSocket/user_py_llm"):
-    def __init__(self, url="ws://120.27.130.190:8092/webSocket/user_py_llm"):
+    def __init__(self, url="ws://120.27.130.190:8092/webSocket/user_py_llm2"):
         self.url = url
         self.ws = None
         self.is_connected = False
