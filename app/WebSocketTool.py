@@ -2,10 +2,10 @@ import websocket
 import threading
 import json
 
-from comfyui.image_edit import generate_image_from_url_and_prompt
-from comfyui.text2image_flux import generate_image_from_prompt
-from comfyui.image2video_official_api import generate_video_from_prompt_and_url
-from comfyui.text2video_official_api import generate_video_from_prompt_and_url as generate_text2video_from_prompt
+from .comfyui.image_edit import generate_image_from_url_and_prompt
+from .comfyui.text2image_flux import generate_image_from_prompt
+from .comfyui.image2video_official_api import generate_video_from_prompt_and_url
+from .comfyui.text2video_official_api import generate_video_from_prompt_and_url as generate_text2video_from_prompt
 
 
 class WebSocketClient:
