@@ -1,5 +1,5 @@
-from . import ImageNetTool
-from . import WebSocketTool
+from app import ImageNetTool
+from app import WebSocketTool
 
 
 def main():
