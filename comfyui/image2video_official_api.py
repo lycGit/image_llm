@@ -1005,7 +1005,7 @@ def generate_video_example():
     # image_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets', 'images', 'girl.png')
     
     # 从URL下载图片示例
-    image_url = "http://120.27.130.190:8091/api/files/download/6b04217c-4372-4062-bb39-46da0c1786e2_temp_image.png"
+    image_url = "http://120.27.130.190:8091/api/files/download/a7767222-dba9-4027-9a3c-6fd93ec9fd7b_temp_image.png"
     image_path = download_image_from_url(image_url)
     
     try:
