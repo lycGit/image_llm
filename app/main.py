@@ -1,9 +1,8 @@
-from app import ImageNetTool
-from app import WebSocketTool
+from app.WebSocketTool import main as websocket_main
 
 
 def main():
-    WebSocketTool.main()
+    websocket_main()
 
 
 if __name__ == '__main__':
