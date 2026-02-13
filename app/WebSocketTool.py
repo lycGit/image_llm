@@ -9,8 +9,7 @@ from app.comfyui.text2video_official_api import generate_video_from_prompt_and_u
 
 
 class WebSocketClient:
-    # def __init__(self, url="ws://127.0.0.1:8092/webSocket/user_py_llm"):
-    def __init__(self, url="ws://120.27.130.190:8092/webSocket/user_py_llm2"):
+    def __init__(self, url="ws://120.27.130.190:8092/webSocket/user_py_llm"):
         self.url = url
         self.ws = None
         self.is_connected = False
@@ -314,12 +313,10 @@ def main():
         # 连接到服务器
         client.connect()
         
-        # 主循环，接收用户输入并发送消息
+        # 主循环，保持连接
         while True:
-            message = input("请输入要发送的消息（输入'quit'退出）: ")
-            if message.lower() == 'quit':
-                break
-            client.send_message(message)
+            import time
+            time.sleep(1)  # 避免CPU占用过高
             
     except KeyboardInterrupt:
         print("\n程序已终止")
