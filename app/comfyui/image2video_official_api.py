@@ -10,9 +10,10 @@ import signal
 import sys
 import time
 
-# 设置服务器地址
-COMFYUI_SERVER_URL = "http://127.0.0.1:8188"
-WEBSOCKET_URL = "ws://127.0.0.1:8188/ws"
+# 设置服务器地址（支持环境变量）
+COMFYUI_SERVER = os.environ.get('COMFYUI_SERVER', '127.0.0.1:8188')
+COMFYUI_SERVER_URL = f"http://{COMFYUI_SERVER}"
+WEBSOCKET_URL = f"ws://{COMFYUI_SERVER}/ws"
 
 # 标志变量，用于控制程序是否继续运行
 should_continue = True
@@ -20,7 +21,7 @@ should_continue = True
 
 
 # 设置服务器地址和客户端
-server_address = "127.0.0.1:8188"
+server_address = os.environ.get('COMFYUI_SERVER', '127.0.0.1:8188')
 client_id = str(uuid.uuid4())
 
 # 标志变量，用于控制程序是否继续运行

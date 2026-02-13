@@ -11,8 +11,8 @@ import random
 import base64
 import requests
 
-# 设置服务器地址和客户端
-server_address = "127.0.0.1:8188"
+# 设置服务器地址和客户端（支持环境变量）
+server_address = os.environ.get('COMFYUI_SERVER', '127.0.0.1:8188')
 client_id = str(uuid.uuid4())
 
 

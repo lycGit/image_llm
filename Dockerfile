@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV PYTHONPATH=/app
+ENV COMFYUI_SERVER=host.docker.internal:8188
 
 EXPOSE 8092
 
