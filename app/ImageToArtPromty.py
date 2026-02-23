@@ -7,8 +7,8 @@ import dashscope
 dashscope.base_http_api_url = "https://dashscope.aliyuncs.com/api/v1"
 
 # 配置参数
-IMAGE_DIR = "/Users/lyc/Desktop/oldstylecompressimage"
-OUTPUT_DIR = "/Users/lyc/Desktop/oldstylecompressimage/results"
+IMAGE_DIR = "/Users/lyc/Desktop/compressimage/5894_selected"
+OUTPUT_DIR = "/Users/lyc/Desktop/compressimage/5894_selected/results"
 API_KEY = "sk-1f85075ccbba49bb80c72c43c1f53254"
 MODEL = 'qwen3.5-plus'
 

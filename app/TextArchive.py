@@ -1,8 +1,8 @@
 import os
 
 # 配置参数
-SOURCE_DIR = "/Users/lyc/Desktop/oldstylecompressimage/results"
-OUTPUT_FILE = "/Users/lyc/Desktop/oldstylecompressimage/merged_results.txt"
+SOURCE_DIR = "/Users/lyc/Desktop/compressimage/5894_selected/results"
+OUTPUT_FILE = "/Users/lyc/Desktop/compressimage/5894_selected/merged_results.txt"
 
 
 def get_txt_files(directory):
