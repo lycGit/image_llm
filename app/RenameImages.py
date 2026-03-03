@@ -42,15 +42,19 @@ def parse_filename(filename):
     """
     解析文件名，提取ID和新的文件名
     
+    支持两种格式:
+    1. {数字}_{名称}_compressed.{扩展名} 例如: "5382_art-1_compressed.jpg"
+    2. {名称}_compressed.{扩展名} 例如: "male-total-1_compressed.jpg"
+    
     参数:
-        filename: 原始文件名，如 "5382_art-1_compressed.jpg"
+        filename: 原始文件名
         
     返回:
         tuple: (id, new_filename) 或 (None, None) 如果解析失败
     """
-    # 使用正则表达式匹配文件名格式: {数字}_{名称}_compressed.{扩展名}
-    pattern = r'^(\d+)_(.+?)_compressed(\.[^.]+)$'
-    match = re.match(pattern, filename)
+    # 格式1: {数字}_{名称}_compressed.{扩展名}
+    pattern1 = r'^(\d+)_(.+?)_compressed(\.[^.]+)$'
+    match = re.match(pattern1, filename)
     
     if match:
         file_id = match.group(1)
@@ -58,6 +62,16 @@ def parse_filename(filename):
         extension = match.group(3)
         new_filename = f"{name_part}{extension}"
         return file_id, new_filename
+    
+    # 格式2: {名称}_compressed.{扩展名}
+    pattern2 = r'^(.+?)_compressed(\.[^.]+)$'
+    match = re.match(pattern2, filename)
+    
+    if match:
+        name_part = match.group(1)
+        extension = match.group(2)
+        new_filename = f"{name_part}{extension}"
+        return IMAGE_ID, new_filename
     
     return None, None
 
